@@ -9,9 +9,13 @@ import {
 import {
   deserializeMessage,
   type BridgeMessage,
+  type TaskPayload,
+  type ResultPayload,
+  type ContextPayload,
 } from '../shared/protocol.js';
 import { BridgeWebSocket } from './websocket.js';
-import { registerTools, type BridgeState } from './tools.js';
+import { registerTools, type BridgeState, type LocalTask } from './tools.js';
+import { writeToInbox, type InboxEntry } from './inbox.js';
 
 async function main(): Promise<void> {
   // -----------------------------------------------------------------------
@@ -74,6 +78,8 @@ async function main(): Promise<void> {
     keypair,
     sharedSecret: null,
     inbox: [],
+    tasks: new Map(),
+    context: new Map(),
   };
 
   // -----------------------------------------------------------------------
@@ -225,9 +231,128 @@ function handleEncryptedMessage(
     const encrypted = new Uint8Array(Buffer.from(blob, 'base64'));
     const decrypted = decrypt(encrypted, state.sharedSecret);
     const message: BridgeMessage = deserializeMessage(decrypted);
-    state.inbox.push(message);
+
+    // Handle by type
+    switch (message.type) {
+      case 'task': {
+        const taskPayload = message.payload as TaskPayload;
+        const now = Date.now();
+        const localTask: LocalTask = {
+          id: message.id,
+          description: taskPayload.description,
+          context: taskPayload.context,
+          priority: taskPayload.priority,
+          status: 'pending',
+          createdAt: now,
+          updatedAt: now,
+          direction: 'received',
+        };
+        state.tasks.set(message.id, localTask);
+
+        // Write to inbox file for hook pickup
+        const inboxEntry: InboxEntry = {
+          id: message.id,
+          type: 'task',
+          from: message.from,
+          timestamp: message.timestamp,
+          summary: `[${taskPayload.priority}] ${taskPayload.description}`,
+        };
+        writeToInbox(inboxEntry);
+
+        console.error(
+          `[bridge] Received task: id=${message.id}, priority=${taskPayload.priority}`,
+        );
+        break;
+      }
+
+      case 'result': {
+        const resultPayload = message.payload as ResultPayload;
+        const task = state.tasks.get(resultPayload.taskId);
+        if (task) {
+          task.status = resultPayload.status;
+          if (resultPayload.summary) {
+            task.result = resultPayload.summary;
+          }
+          task.updatedAt = Date.now();
+          console.error(
+            `[bridge] Task ${resultPayload.taskId} updated to status=${resultPayload.status}`,
+          );
+        } else {
+          console.error(
+            `[bridge] Received result for unknown task: ${resultPayload.taskId}`,
+          );
+        }
+
+        // Also write to inbox for hook notification
+        const resultInboxEntry: InboxEntry = {
+          id: message.id,
+          type: 'result',
+          from: message.from,
+          timestamp: message.timestamp,
+          summary: `Task ${resultPayload.taskId} -> ${resultPayload.status}${resultPayload.summary ? ': ' + resultPayload.summary : ''}`,
+        };
+        writeToInbox(resultInboxEntry);
+        break;
+      }
+
+      case 'context': {
+        const ctxPayload = message.payload as ContextPayload;
+        const existingEntry = state.context.get(ctxPayload.key);
+
+        // Last-write-wins by timestamp
+        if (
+          !existingEntry ||
+          message.timestamp >= existingEntry.timestamp
+        ) {
+          switch (ctxPayload.operation) {
+            case 'set':
+              state.context.set(ctxPayload.key, {
+                value: ctxPayload.value,
+                timestamp: message.timestamp,
+              });
+              break;
+            case 'append': {
+              const prev = existingEntry?.value ?? '';
+              state.context.set(ctxPayload.key, {
+                value: prev + ctxPayload.value,
+                timestamp: message.timestamp,
+              });
+              break;
+            }
+            case 'delete':
+              state.context.delete(ctxPayload.key);
+              break;
+          }
+        }
+
+        console.error(
+          `[bridge] Context ${ctxPayload.operation}: key=${ctxPayload.key}`,
+        );
+        break;
+      }
+
+      case 'chat':
+      default:
+        // Push to inbox for bridge_get_messages consumption
+        state.inbox.push(message);
+
+        // Write to inbox file for hook pickup
+        const chatInboxEntry: InboxEntry = {
+          id: message.id,
+          type: message.type,
+          from: message.from,
+          timestamp: message.timestamp,
+          summary:
+            message.type === 'chat'
+              ? (message.payload as { content: string }).content
+              : JSON.stringify(message.payload),
+        };
+        writeToInbox(chatInboxEntry);
+        break;
+    }
+
     console.error(
-      `[bridge] Received message: type=${message.type}, id=${message.id} (inbox size: ${state.inbox.length})`,
+      `[bridge] Received message: type=${message.type}, id=${message.id}`,
     );
   } catch (err) {
     console.error(
