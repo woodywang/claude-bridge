@@ -22,10 +22,15 @@ export interface Keypair {
   privateKey: Uint8Array;
 }
 
+function assertInitialized(): asserts sodium is typeof _sodium {
+  if (!sodium) throw new Error('Crypto not initialized: call await initCrypto() first');
+}
+
 /**
  * Generate an X25519 keypair for key exchange.
  */
 export function generateKeypair(): Keypair {
+  assertInitialized();
   const kp = sodium.crypto_box_keypair();
   return {
     publicKey: kp.publicKey,
@@ -41,6 +46,7 @@ export function computeSharedSecret(
   theirPublicKey: Uint8Array,
   myPrivateKey: Uint8Array,
 ): Uint8Array {
+  assertInitialized();
   return sodium.crypto_box_beforenm(theirPublicKey, myPrivateKey);
 }
 
@@ -55,6 +61,7 @@ export function encrypt(
   plaintext: Uint8Array,
   sharedSecret: Uint8Array,
 ): Uint8Array {
+  assertInitialized();
   if (plaintext.byteLength > MAX_MESSAGE_SIZE) {
     throw new Error(
       `Message size ${plaintext.byteLength} exceeds maximum ${MAX_MESSAGE_SIZE} bytes`,
@@ -86,11 +93,13 @@ export function decrypt(
   encrypted: Uint8Array,
   sharedSecret: Uint8Array,
 ): Uint8Array {
-  const nonceLength = sodium.crypto_box_NONCEBYTES; // 24 bytes
-
-  if (encrypted.byteLength <= nonceLength) {
-    throw new Error('Encrypted data too short to contain nonce and ciphertext');
+  assertInitialized();
+  const minLength = sodium.crypto_box_NONCEBYTES + sodium.crypto_box_MACBYTES;
+  if (encrypted.byteLength < minLength) {
+    throw new Error(`Encrypted data too short: ${encrypted.byteLength} bytes, minimum is ${minLength}`);
   }
+
+  const nonceLength = sodium.crypto_box_NONCEBYTES; // 24 bytes
 
   const nonce = encrypted.slice(0, nonceLength);
   const ciphertext = encrypted.slice(nonceLength);
