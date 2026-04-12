@@ -39,6 +39,14 @@ export class BridgeRoom extends DurableObject<Env> {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
 
+    const existing = this.ctx.getWebSockets();
+    if (existing.length >= 2) {
+      return new Response(JSON.stringify({ error: 'Room is full (max 2 peers)' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 
@@ -54,6 +62,10 @@ export class BridgeRoom extends DurableObject<Env> {
 
   /**
    * Handle incoming WebSocket messages.
+   *
+   * Key exchange travels as relay messages with opaque payloads.
+   * The DO never handles key_exchange directly — zero-knowledge by design.
+   * Clients send: { type: 'relay', payload: { controlType: 'key_exchange', publicKey: '...' } }
    */
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string') {
@@ -90,7 +102,7 @@ export class BridgeRoom extends DurableObject<Env> {
   /**
    * Handle WebSocket close — notify remaining peers.
    */
-  async webSocketClose(ws: WebSocket, code: number, reason: string, wasClean: boolean): Promise<void> {
+  async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
     const sockets = this.ctx.getWebSockets();
     const notification = JSON.stringify({ type: 'peer_disconnected' });
 
@@ -146,18 +158,6 @@ export class BridgeRoom extends DurableObject<Env> {
   private async handleRelay(ws: WebSocket, parsed: Record<string, unknown>): Promise<void> {
     const fullMessage = JSON.stringify(parsed);
 
-    // Broadcast to all other connected WebSockets
-    const sockets = this.ctx.getWebSockets();
-    for (const socket of sockets) {
-      if (socket !== ws) {
-        try {
-          socket.send(fullMessage);
-        } catch {
-          // Socket may already be closed
-        }
-      }
-    }
-
     // Store in message log for sync replay
     const entry: MessageLogEntry = {
       id: generateId(),
@@ -174,6 +174,19 @@ export class BridgeRoom extends DurableObject<Env> {
     }
 
     await this.ctx.storage.put('messageLog', messageLog);
+
+    // Broadcast to all other connected WebSockets with seqId so clients can track
+    const envelope = JSON.stringify({ ...parsed, seqId: entry.id });
+    const sockets = this.ctx.getWebSockets();
+    for (const socket of sockets) {
+      if (socket !== ws) {
+        try {
+          socket.send(envelope);
+        } catch {
+          // Socket may already be closed
+        }
+      }
+    }
   }
 
   private async handleSync(ws: WebSocket, parsed: Record<string, unknown>): Promise<void> {
@@ -193,9 +206,11 @@ export class BridgeRoom extends DurableObject<Env> {
 
     for (const entry of toReplay) {
       try {
-        ws.send(entry.data);
+        const replayData = JSON.parse(entry.data);
+        replayData.seqId = entry.id;
+        ws.send(JSON.stringify(replayData));
       } catch {
-        // Socket may have closed
+        // Socket may have closed or data may be corrupt
         break;
       }
     }
