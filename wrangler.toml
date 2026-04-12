@@ -9,4 +9,4 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["BridgeRoom"]
+new_sqlite_classes = ["BridgeRoom"]
