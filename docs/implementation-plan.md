@@ -21,6 +21,11 @@ Design doc: `~/.gstack/projects/claude-bridge/woody-unknown-design-20260412-1421
 └──────────────────────┘        └──────────────────────┘        └──────────────────────┘
 ```
 
+**Key findings from feasibility spikes (2026-04-12):**
+1. **libsodium-wrappers ESM broken on Node 25** — bare `import` fails (missing companion `.mjs` file in package). Fix: use `createRequire(import.meta.url)` to load CJS bundle. Must apply in `src/shared/crypto.ts`.
+2. **Key exchange timing** — when both sides connect simultaneously, each broadcasts pubkey but may miss the other's. Fix: upon receiving peer's pubkey, re-broadcast own pubkey so peer can complete exchange.
+3. **MCP stdio + WebSocket coexistence** — validated. Single Node.js process can hold `StdioServerTransport` + long-lived WebSocket without conflict.
+
 **Key decisions from eng review:**
 1. **Single process MCP server** (no daemon) — MCP server holds WebSocket connection directly. Lives/dies with Claude Code. Messages queue in DO when offline.
 2. **libsodium-wrappers** over tweetnacl — audited, Signal/WhatsApp-grade, same NaCl API
@@ -41,17 +46,20 @@ src/
     index.ts          # MCP server entry, stdio transport, WebSocket connection
     tools.ts          # bridge_* MCP tool handlers
     websocket.ts      # WebSocket connection mgmt, reconnect, sync replay
+    inbox.ts          # Write incoming messages to ~/.claude-bridge/inbox.json for hook pickup
   worker/
     index.ts          # CF Worker entry, routes to DO
     durable-object.ts # DO class: Hibernation WebSocket, room lifecycle, message relay
-  cli.ts              # CLI: host, join, status, mcp-install
+  hooks/
+    check-inbox.ts    # UserPromptSubmit hook script: read inbox.json, output to stdout if non-empty
+  cli.ts              # CLI: host, join, status, mcp-install (also installs hook)
 package.json
 tsconfig.json
 wrangler.toml
 vitest.config.ts
 ```
 
-8 source files. Clean boundaries: `shared/` is pure logic (no IO), `mcp/` handles Claude Code + network, `worker/` is CF-side.
+10 source files. Clean boundaries: `shared/` is pure logic (no IO), `mcp/` handles Claude Code + network, `worker/` is CF-side, `hooks/` is Claude Code hook integration.
 
 ## Protocol
 
@@ -105,17 +113,23 @@ type BridgeMessage = {
 - WebSocket connection to CF DO within MCP process
 - bridge_send_message + bridge_get_messages working end-to-end
 
-### Phase 3: Tasks + Context (Day 3-4)
+### Phase 3: Tasks + Context + Hook Notification (Day 3-4)
 - Task dispatch and result flow
 - Client-side task state tracking (in-memory)
 - Context KV store (set/get/append/delete, last-write-wins)
 - Explicit task cancellation (no timeouts)
+- **Incoming message notification via Claude Code hook:**
+  - MCP server writes incoming messages to `~/.claude-bridge/inbox.json` on WebSocket receive
+  - `UserPromptSubmit` hook script reads inbox file; if non-empty, outputs message summary to stdout → injected into Claude Code prompt
+  - `claude-bridge mcp-install` also installs the hook into `.claude/settings.json`
+  - Sending side: `bridge_send_task` / `bridge_send_message` tool response includes "任务已发送，请到对方机器的 Claude 会话里输入任意内容触发接收"
+- **Flow:** Server Claude sends task → MCP server encrypts → CF relay → Local MCP server decrypts → writes to inbox.json → User types anything in local Claude → Hook fires, injects message → Local Claude sees and handles task
 
 ### Phase 4: CLI + Polish (Day 4-5)
 - `claude-bridge host` — create room, display code
 - `claude-bridge join <code>` — join existing room
 - `claude-bridge status` — show connection status
-- `claude-bridge mcp-install` — register MCP server in Claude Code settings
+- `claude-bridge mcp-install` — register MCP server in Claude Code settings AND install `UserPromptSubmit` hook
 - Reconnection with sync replay from DO
 - Graceful error handling
 
@@ -127,7 +141,7 @@ type BridgeMessage = {
 
 ## Testing Strategy
 - **Framework**: Vitest
-- **Unit**: crypto (9 test cases), protocol (5 test cases), tasks (5 test cases)
+- **Unit**: crypto (9 test cases), protocol (5 test cases), tasks (5 test cases), inbox (2 test cases: write/read/clear cycle, hook script stdout format)
 - **Integration**: two bridge instances via wrangler dev, room pairing, message relay
 - **Manual E2E checklist**: two machines, full flow
 - Test plan: `~/.gstack/projects/claude-bridge/woody-main-eng-review-test-plan-20260412-144500.md`
@@ -151,7 +165,8 @@ type BridgeMessage = {
 - File transfer
 - Session replay
 - CI/CD pipeline for npm publishing
-- Watcher process (not needed without daemon)
+- Watcher process / `claude --print` spawning (replaced with hook-based notification)
+- tmux / OS-level input injection (not cross-machine compatible)
 
 ## Worktree Parallelization Strategy
 
@@ -176,6 +191,7 @@ Launch A first. Start B after Phase 1 merges. Then Phase 5.
 4. Verify via `wrangler tail` that DO logs show only encrypted blobs
 5. `vitest run` — all unit + integration tests pass
 6. In Claude Code: `bridge_send_task("test task", "test context", "normal")` → verify other side receives
+7. Hook verification: send task from side A → switch to side B's Claude Code → type anything → verify bridge message is injected into prompt and Claude responds to it
 
 ## GSTACK REVIEW REPORT
 

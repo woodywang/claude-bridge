@@ -26,18 +26,19 @@ Vitest (TypeScript native, CF Workers compatible)
 - Missing required fields handling
 - Max size validation before serialization
 
-## Unit Tests (src/daemon/)
+## Unit Tests (src/mcp/)
 
 ### tasks.ts
 - Task lifecycle: pending → ack → in_progress → done
 - Task lifecycle: pending → failed (no ack timeout)
-- Timeout enforcement: 60s no-ack → failed
-- Timeout enforcement: 5min no-result → failed
+- Explicit task cancellation
 - Message deduplication by ID (bounded to 1000)
 
-### watcher.ts
-- Incoming task triggers claude-code spawn
-- Claude Code not installed: graceful error
+### inbox.ts
+- Write message to inbox.json: file created, correct format
+- Read + clear cycle: messages returned then file emptied
+- Hook script outputs correct format to stdout when inbox non-empty
+- Hook script outputs nothing when inbox empty
 
 ## Integration Tests
 
@@ -49,9 +50,9 @@ Vitest (TypeScript native, CF Workers compatible)
 - Invalid/expired room code rejection
 - Peer offline → message queues → reconnect → delivered
 
-### MCP tools via daemon HTTP API
-- bridge_send_message: sends via daemon
-- bridge_get_messages: reads from daemon queue
+### MCP tools via MCP server
+- bridge_send_message: sends via WebSocket relay
+- bridge_get_messages: reads from in-memory queue
 - bridge_send_task + bridge_get_tasks: task lifecycle
 
 ## E2E Tests (manual checklist)
@@ -62,7 +63,8 @@ Vitest (TypeScript native, CF Workers compatible)
 - [ ] First encrypted message sent and received
 
 ### Task dispatch flow
-- [ ] Server sends task → local daemon receives → Claude Code session spawned
+- [ ] Server sends task → local MCP server receives → written to inbox.json
+- [ ] User types anything in local Claude → hook injects bridge message → Claude handles task
 - [ ] Claude Code completes task → result sent back → server sees 'done' status
 
 ### Security verification
@@ -71,5 +73,5 @@ Vitest (TypeScript native, CF Workers compatible)
 
 ## Critical Paths
 - Room pairing + key exchange must complete before any data messages can be sent
-- Task dispatch → watcher → Claude Code spawn is the core value proposition
+- Task dispatch → inbox.json → hook injection → Claude handles task is the core value proposition
 - Encryption round-trip correctness is security-critical
