@@ -15,7 +15,7 @@ import {
 } from '../shared/protocol.js';
 import { BridgeWebSocket } from './websocket.js';
 import { registerTools, type BridgeState, type LocalTask } from './tools.js';
-import { writeToInbox, type InboxEntry } from './inbox.js';
+import { writeToInbox, ensureInboxDir, type InboxEntry } from './inbox.js';
 
 async function main(): Promise<void> {
   // -----------------------------------------------------------------------
@@ -39,6 +39,7 @@ async function main(): Promise<void> {
   // -----------------------------------------------------------------------
   console.error('[bridge] Initializing crypto...');
   await initCrypto();
+  ensureInboxDir();
 
   // -----------------------------------------------------------------------
   // 3. If host and no code, create room via HTTP POST
@@ -91,8 +92,8 @@ async function main(): Promise<void> {
 
   const ws = new BridgeWebSocket(
     wsUrl,
-    (rawData: string) => {
-      handleRelayMessage(rawData, state);
+    (data: unknown) => {
+      handleRelayMessage(data, state);
     },
     () => {
       sendKeyExchange(state);
@@ -143,14 +144,12 @@ async function main(): Promise<void> {
 // Relay message handler
 // ---------------------------------------------------------------------------
 
-function handleRelayMessage(rawData: string, state: BridgeState): void {
-  let msg: Record<string, unknown>;
-  try {
-    msg = JSON.parse(rawData);
-  } catch {
-    console.error('[bridge] Failed to parse relay message as JSON');
+function handleRelayMessage(data: unknown, state: BridgeState): void {
+  if (!data || typeof data !== 'object') {
+    console.error('[bridge] Received non-object relay message');
     return;
   }
+  const msg = data as Record<string, unknown>;
 
   const payload = msg.payload as Record<string, unknown> | undefined;
   if (!payload) {

@@ -6,7 +6,7 @@ const MAX_RECONNECT_DELAY = 30000;
 export class BridgeWebSocket {
   private ws: WebSocket | null = null;
   private url: string;
-  private onMessage: (data: string) => void;
+  private onMessage: (data: unknown) => void;
   private reconnectDelay = MIN_RECONNECT_DELAY;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = true;
@@ -15,7 +15,7 @@ export class BridgeWebSocket {
 
   constructor(
     url: string,
-    onMessage: (data: string) => void,
+    onMessage: (data: unknown) => void,
     onOpen?: () => void,
   ) {
     this.url = url;
@@ -57,16 +57,19 @@ export class BridgeWebSocket {
 
       this.ws.on('message', (data: WebSocket.Data) => {
         const str = typeof data === 'string' ? data : data.toString();
-        // Track seqId from relay messages
+        let parsed: unknown;
         try {
-          const parsed = JSON.parse(str);
-          if (parsed.seqId) {
-            this._lastSeenSeqId = parsed.seqId;
-          }
+          parsed = JSON.parse(str);
         } catch {
-          // Not JSON — pass through anyway
+          // Not JSON — pass through as raw string
+          this.onMessage(str);
+          return;
         }
-        this.onMessage(str);
+        // Track seqId from relay messages
+        if (parsed && typeof parsed === 'object' && 'seqId' in parsed) {
+          this._lastSeenSeqId = String((parsed as Record<string, unknown>).seqId);
+        }
+        this.onMessage(parsed);
       });
 
       this.ws.on('close', (code: number, reason: Buffer) => {

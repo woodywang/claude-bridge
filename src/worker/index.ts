@@ -1,12 +1,6 @@
 export { BridgeRoom } from './durable-object.js';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface Env {
-  ROOM: DurableObjectNamespace;
-}
+export type { Env } from './env.js';
+import type { Env } from './env.js';
 
 // ---------------------------------------------------------------------------
 // Room code generation

@@ -1,12 +1,9 @@
 import { DurableObject } from 'cloudflare:workers';
+import type { Env } from './env.js';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-interface Env {
-  ROOM: DurableObjectNamespace;
-}
 
 interface SocketAttachment {
   role?: 'host' | 'peer';

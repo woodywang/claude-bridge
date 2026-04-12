@@ -16,6 +16,14 @@ export interface InboxEntry {
   summary: string; // human-readable summary of the message
 }
 
+let dirCreated = false;
+
+export function ensureInboxDir(inboxDir?: string): void {
+  if (dirCreated) return;
+  mkdirSync(inboxDir ?? INBOX_DIR, { recursive: true });
+  dirCreated = true;
+}
+
 export function getInboxDir(): string {
   return INBOX_DIR;
 }
@@ -32,7 +40,6 @@ export function writeToInbox(
   inboxDir: string = INBOX_DIR,
   inboxFile: string = INBOX_FILE,
 ): void {
-  mkdirSync(inboxDir, { recursive: true });
   const existing = readInbox(inboxFile);
   existing.push(entry);
   writeFileSync(inboxFile, JSON.stringify(existing, null, 2));

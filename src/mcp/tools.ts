@@ -38,6 +38,32 @@ export interface BridgeState {
   context: Map<string, { value: string; timestamp: number }>;
 }
 
+// ---------------------------------------------------------------------------
+// MCP result helpers
+// ---------------------------------------------------------------------------
+
+function textResult(text: string) {
+  return { content: [{ type: 'text' as const, text }] };
+}
+
+function errorResult(text: string) {
+  return { content: [{ type: 'text' as const, text }], isError: true as const };
+}
+
+function requireConnected(state: BridgeState): ReturnType<typeof errorResult> | null {
+  if (!state.sharedSecret) {
+    return errorResult('Key exchange not complete. Wait for the peer to connect.');
+  }
+  if (!state.ws.connected) {
+    return errorResult('WebSocket not connected. Check bridge status.');
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Encrypt + send helper
+// ---------------------------------------------------------------------------
+
 /**
  * Helper: encrypt a BridgeMessage and send via WebSocket relay.
  * Returns the serialized byte length and base64 blob length.
@@ -62,6 +88,42 @@ function encryptAndSend(
   return { plaintextBytes: serialized.byteLength, blobLength: blob.length };
 }
 
+// ---------------------------------------------------------------------------
+// Shared task update helper (used by bridge_update_task and bridge_cancel_task)
+// ---------------------------------------------------------------------------
+
+async function updateTaskAndNotify(
+  state: BridgeState,
+  taskId: string,
+  status: ResultPayload['status'],
+  summary?: string,
+  details?: string,
+): Promise<ReturnType<typeof textResult>> {
+  const task = state.tasks.get(taskId);
+  if (!task) return errorResult(`Task not found: ${taskId}`);
+
+  const err = requireConnected(state);
+  if (err) return err;
+
+  task.status = status;
+  if (summary) task.result = summary;
+  task.updatedAt = Date.now();
+
+  const msg = createBridgeMessage('result', state.role, {
+    taskId,
+    status,
+    summary,
+    details,
+  } as ResultPayload);
+
+  encryptAndSend(msg, state);
+  return textResult(`Task ${taskId} updated to ${status}`);
+}
+
+// ---------------------------------------------------------------------------
+// Tool registration
+// ---------------------------------------------------------------------------
+
 export function registerTools(server: McpServer, state: BridgeState): void {
   // bridge_status — returns current bridge connection status
   server.tool(
@@ -69,21 +131,13 @@ export function registerTools(server: McpServer, state: BridgeState): void {
     'Returns the current status of the bridge connection',
     {},
     async () => {
-      const status = {
+      return textResult(JSON.stringify({
         role: state.role,
         roomCode: state.roomCode,
         wsConnected: state.ws.connected,
         keyExchangeDone: state.sharedSecret !== null,
         pendingMessages: state.inbox.length,
-      };
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(status, null, 2),
-          },
-        ],
-      };
+      }, null, 2));
     },
   );
 
@@ -95,69 +149,21 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       content: z.string().describe('The message content to send'),
     },
     async ({ content }) => {
-      if (!state.sharedSecret) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: Key exchange not complete yet. Wait for the peer to connect and exchange keys before sending messages.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.ws.connected) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: WebSocket is not connected. Waiting for reconnection.',
-            },
-          ],
-          isError: true,
-        };
-      }
+      const err = requireConnected(state);
+      if (err) return err;
 
       try {
-        // Create and serialize the BridgeMessage
         const msg = createBridgeMessage('chat', state.role, {
           content,
         } satisfies ChatPayload);
-        const serialized = serializeMessage(msg);
 
-        // Encrypt
-        const encrypted = encrypt(serialized, state.sharedSecret);
-        const blob = Buffer.from(encrypted).toString('base64');
+        const { plaintextBytes, blobLength } = encryptAndSend(msg, state);
 
-        // Wrap in relay envelope and send
-        const envelope = JSON.stringify({
-          type: 'relay',
-          payload: {
-            dataType: 'encrypted',
-            blob,
-          },
-        });
-        state.ws.send(envelope);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Message sent (${serialized.byteLength} bytes plaintext, ${blob.length} bytes encrypted+base64, id=${msg.id})`,
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error sending message: ${(err as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
+        return textResult(
+          `Message sent (${plaintextBytes} bytes plaintext, ${blobLength} bytes encrypted+base64, id=${msg.id})`,
+        );
+      } catch (e) {
+        return errorResult(`Error sending message: ${(e as Error).message}`);
       }
     },
   );
@@ -183,10 +189,8 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       if (since) {
         const idx = state.inbox.findIndex((m) => m.id === since);
         if (idx === -1) {
-          // If not found, return all messages (the since ID may have been cleared already)
           messages = state.inbox.splice(0, maxMessages);
         } else {
-          // Remove everything up to and including the `since` message, then take up to limit
           state.inbox.splice(0, idx + 1);
           messages = state.inbox.splice(0, maxMessages);
         }
@@ -194,22 +198,11 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         messages = state.inbox.splice(0, maxMessages);
       }
 
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                count: messages.length,
-                remaining: state.inbox.length,
-                messages,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+      return textResult(JSON.stringify({
+        count: messages.length,
+        remaining: state.inbox.length,
+        messages,
+      }, null, 2));
     },
   );
 
@@ -225,29 +218,8 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         .describe('Task priority'),
     },
     async ({ description, context, priority }) => {
-      if (!state.sharedSecret) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: Key exchange not complete yet.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.ws.connected) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: WebSocket is not connected.',
-            },
-          ],
-          isError: true,
-        };
-      }
+      const err = requireConnected(state);
+      if (err) return err;
 
       try {
         const msg = createBridgeMessage('task', state.role, {
@@ -272,31 +244,12 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         };
         state.tasks.set(msg.id, localTask);
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  taskId: msg.id,
-                  note: '任务已发送，请到对方机器的 Claude 会话里输入任意内容触发接收',
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error sending task: ${(err as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
+        return textResult(JSON.stringify({
+          taskId: msg.id,
+          note: '任务已发送，请到对方机器的 Claude 会话里输入任意内容触发接收',
+        }, null, 2));
+      } catch (e) {
+        return errorResult(`Error sending task: ${(e as Error).message}`);
       }
     },
   );
@@ -317,21 +270,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         tasks = tasks.filter((t) => t.status === status);
       }
 
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                count: tasks.length,
-                tasks,
-              },
-              null,
-              2,
-            ),
-          },
-        ],
-      };
+      return textResult(JSON.stringify({ count: tasks.length, tasks }, null, 2));
     },
   );
 
@@ -350,87 +289,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         .describe('Result or summary of the task'),
     },
     async ({ id, status, result }) => {
-      const task = state.tasks.get(id);
-      if (!task) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error: Task not found: ${id}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.sharedSecret) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: Key exchange not complete yet.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.ws.connected) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: WebSocket is not connected.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      try {
-        // Update local task
-        task.status = status;
-        if (result !== undefined) {
-          task.result = result;
-        }
-        task.updatedAt = Date.now();
-
-        // Send result to peer
-        const msg = createBridgeMessage('result', state.role, {
-          taskId: id,
-          status,
-          summary: result,
-        } satisfies ResultPayload);
-
-        encryptAndSend(msg, state);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  taskId: id,
-                  status,
-                  updated: true,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error updating task: ${(err as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+      return updateTaskAndNotify(state, id, status, result);
     },
   );
 
@@ -446,85 +305,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         .describe('Reason for cancellation'),
     },
     async ({ id, reason }) => {
-      const task = state.tasks.get(id);
-      if (!task) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error: Task not found: ${id}`,
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.sharedSecret) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: Key exchange not complete yet.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.ws.connected) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: WebSocket is not connected.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      try {
-        // Mark local task as failed
-        task.status = 'failed';
-        task.result = reason ?? 'Cancelled';
-        task.updatedAt = Date.now();
-
-        // Send result to peer
-        const msg = createBridgeMessage('result', state.role, {
-          taskId: id,
-          status: 'failed',
-          summary: reason ?? 'Cancelled',
-        } satisfies ResultPayload);
-
-        encryptAndSend(msg, state);
-
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  taskId: id,
-                  status: 'failed',
-                  reason: reason ?? 'Cancelled',
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error cancelling task: ${(err as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
-      }
+      return updateTaskAndNotify(state, id, 'failed', reason ?? 'Cancelled');
     },
   );
 
@@ -534,20 +315,11 @@ export function registerTools(server: McpServer, state: BridgeState): void {
     'Get the entire shared context key-value store',
     {},
     async () => {
-      const contextObj: Record<string, { value: string; timestamp: number }> =
-        {};
+      const contextObj: Record<string, { value: string; timestamp: number }> = {};
       for (const [key, val] of state.context.entries()) {
         contextObj[key] = val;
       }
-
-      return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(contextObj, null, 2),
-          },
-        ],
-      };
+      return textResult(JSON.stringify(contextObj, null, 2));
     },
   );
 
@@ -560,37 +332,13 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       value: z.string().describe('Context value'),
     },
     async ({ key, value }) => {
-      if (!state.sharedSecret) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: Key exchange not complete yet.',
-            },
-          ],
-          isError: true,
-        };
-      }
-
-      if (!state.ws.connected) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Error: WebSocket is not connected.',
-            },
-          ],
-          isError: true,
-        };
-      }
+      const err = requireConnected(state);
+      if (err) return err;
 
       try {
         const timestamp = Date.now();
-
-        // Update local context
         state.context.set(key, { value, timestamp });
 
-        // Send context update to peer
         const msg = createBridgeMessage('context', state.role, {
           key,
           value,
@@ -599,33 +347,9 @@ export function registerTools(server: McpServer, state: BridgeState): void {
 
         encryptAndSend(msg, state);
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  key,
-                  value,
-                  timestamp,
-                  synced: true,
-                },
-                null,
-                2,
-              ),
-            },
-          ],
-        };
-      } catch (err) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `Error setting context: ${(err as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
+        return textResult(JSON.stringify({ key, value, timestamp, synced: true }, null, 2));
+      } catch (e) {
+        return errorResult(`Error setting context: ${(e as Error).message}`);
       }
     },
   );
