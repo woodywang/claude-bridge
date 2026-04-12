@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   // -----------------------------------------------------------------------
   if (role === 'host' && !roomCode) {
     console.error('[bridge] Creating room...');
-    const createUrl = `${workerUrl}/room`;
+    const createUrl = `${workerUrl}/room/create`;
     const resp = await fetch(createUrl, { method: 'POST' });
     if (!resp.ok) {
       const text = await resp.text();

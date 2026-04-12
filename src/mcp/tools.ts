@@ -165,7 +165,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
   // bridge_get_messages — retrieve pending messages from inbox
   server.tool(
     'bridge_get_messages',
-    'Get pending incoming messages from the peer. Messages are removed from the inbox once returned (consume-once).',
+    'Get pending incoming chat messages from the peer. Messages are removed from the inbox once returned (consume-once). For tasks, use bridge_get_tasks instead.',
     {
       since: z
         .string()

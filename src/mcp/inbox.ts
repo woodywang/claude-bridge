@@ -1,7 +1,7 @@
 // Writes incoming messages to ~/.claude-bridge/inbox.json for hook pickup
 // Read by the UserPromptSubmit hook script
 
-import { mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
@@ -48,4 +48,30 @@ export function readInbox(inboxFile: string = INBOX_FILE): InboxEntry[] {
 
 export function clearInbox(inboxFile: string = INBOX_FILE): void {
   writeFileSync(inboxFile, '[]');
+}
+
+/**
+ * Atomically read and clear the inbox using rename.
+ * Prevents race condition between hook reader and MCP writer.
+ */
+export function readAndClearInbox(inboxDir?: string): InboxEntry[] {
+  const dir = inboxDir ?? INBOX_DIR;
+  const file = join(dir, 'inbox.json');
+  const processingFile = join(dir, 'inbox.processing.json');
+
+  try {
+    // Atomic rename - prevents race with MCP writer
+    renameSync(file, processingFile);
+  } catch {
+    return []; // No inbox file
+  }
+
+  try {
+    const entries = JSON.parse(readFileSync(processingFile, 'utf-8'));
+    unlinkSync(processingFile);
+    return entries;
+  } catch {
+    try { unlinkSync(processingFile); } catch { /* ignore */ }
+    return [];
+  }
 }

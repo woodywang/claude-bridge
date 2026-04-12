@@ -7,6 +7,7 @@ import {
   writeToInbox,
   readInbox,
   clearInbox,
+  readAndClearInbox,
   type InboxEntry,
 } from './inbox.js';
 
@@ -74,6 +75,39 @@ describe('inbox', () => {
     expect(entries[0]!.id).toBe('id-1');
     expect(entries[1]!.id).toBe('id-2');
     expect(entries[2]!.id).toBe('id-3');
+  });
+
+  it('readAndClearInbox returns entries and removes inbox file', () => {
+    const entry1 = makeEntry({ id: 'id-1', summary: 'First' });
+    const entry2 = makeEntry({ id: 'id-2', summary: 'Second' });
+
+    writeToInbox(entry1, tempDir, tempFile);
+    writeToInbox(entry2, tempDir, tempFile);
+
+    const entries = readAndClearInbox(tempDir);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]!.id).toBe('id-1');
+    expect(entries[1]!.id).toBe('id-2');
+
+    // Inbox file should be gone (no processing file left either)
+    expect(existsSync(tempFile)).toBe(false);
+    expect(existsSync(join(tempDir, 'inbox.processing.json'))).toBe(false);
+  });
+
+  it('readAndClearInbox returns empty array when no inbox file', () => {
+    const entries = readAndClearInbox(tempDir);
+    expect(entries).toEqual([]);
+  });
+
+  it('readAndClearInbox is safe to call twice (second call returns empty)', () => {
+    const entry = makeEntry({ id: 'id-1' });
+    writeToInbox(entry, tempDir, tempFile);
+
+    const first = readAndClearInbox(tempDir);
+    expect(first).toHaveLength(1);
+
+    const second = readAndClearInbox(tempDir);
+    expect(second).toEqual([]);
   });
 
   it('hook script outputs correct format when inbox non-empty', () => {

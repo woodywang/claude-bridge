@@ -31,7 +31,7 @@ program
     console.log('Creating room...');
 
     try {
-      const resp = await fetch(`${workerUrl}/room`, { method: 'POST' });
+      const resp = await fetch(`${workerUrl}/room/create`, { method: 'POST' });
       if (!resp.ok) {
         const text = await resp.text();
         console.error(`Failed to create room: ${resp.status} ${text}`);

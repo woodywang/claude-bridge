@@ -16,11 +16,24 @@ const ROOM_CODE_LENGTH = 6;
 const ROOM_CODE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 function generateRoomCode(): string {
-  const bytes = new Uint8Array(ROOM_CODE_LENGTH);
+  const bytes = new Uint8Array(ROOM_CODE_LENGTH * 2); // extra bytes for rejection sampling
   crypto.getRandomValues(bytes);
   let code = '';
-  for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-    code += ROOM_CODE_CHARS[bytes[i] % ROOM_CODE_CHARS.length];
+  const maxValid = Math.floor(256 / ROOM_CODE_CHARS.length) * ROOM_CODE_CHARS.length; // 252
+  for (const byte of bytes) {
+    if (code.length >= ROOM_CODE_LENGTH) break;
+    if (byte < maxValid) {
+      code += ROOM_CODE_CHARS[byte % ROOM_CODE_CHARS.length];
+    }
+    // else: reject this byte (bias zone)
+  }
+  // Fallback: if rejection sampling used all bytes (extremely unlikely), fill remainder
+  while (code.length < ROOM_CODE_LENGTH) {
+    const extra = new Uint8Array(1);
+    crypto.getRandomValues(extra);
+    if (extra[0] < maxValid) {
+      code += ROOM_CODE_CHARS[extra[0] % ROOM_CODE_CHARS.length];
+    }
   }
   return code;
 }
