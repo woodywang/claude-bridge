@@ -83,9 +83,15 @@ async function main(): Promise<void> {
   const wsHost = workerUrl.replace(/^https?:\/\//, '');
   const wsUrl = `${wsProto}://${wsHost}/room/${roomCode}/ws`;
 
-  const ws = new BridgeWebSocket(wsUrl, (rawData: string) => {
-    handleRelayMessage(rawData, state);
-  });
+  const ws = new BridgeWebSocket(
+    wsUrl,
+    (rawData: string) => {
+      handleRelayMessage(rawData, state);
+    },
+    () => {
+      sendKeyExchange(state);
+    },
+  );
   state.ws = ws;
 
   // Connect to WebSocket
@@ -99,13 +105,6 @@ async function main(): Promise<void> {
     console.error('[bridge] Will retry via auto-reconnect...');
     // Don't exit — the auto-reconnect in BridgeWebSocket will keep trying.
     // We still start the MCP server so Claude Code can query status.
-  }
-
-  // -----------------------------------------------------------------------
-  // 7. Send our public key for key exchange
-  // -----------------------------------------------------------------------
-  if (ws.connected) {
-    sendKeyExchange(state);
   }
 
   // -----------------------------------------------------------------------

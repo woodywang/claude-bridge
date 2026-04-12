@@ -11,10 +11,16 @@ export class BridgeWebSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = true;
   private _lastSeenSeqId: string | null = null;
+  private onOpen?: () => void;
 
-  constructor(url: string, onMessage: (data: string) => void) {
+  constructor(
+    url: string,
+    onMessage: (data: string) => void,
+    onOpen?: () => void,
+  ) {
     this.url = url;
     this.onMessage = onMessage;
+    this.onOpen = onOpen;
   }
 
   async connect(): Promise<void> {
@@ -40,6 +46,8 @@ export class BridgeWebSocket {
           this.ws!.send(syncMsg);
           console.error(`[bridge-ws] Sent sync with lastSeenId=${this._lastSeenSeqId}`);
         }
+
+        this.onOpen?.();
 
         if (!resolved) {
           resolved = true;
