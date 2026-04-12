@@ -5,7 +5,7 @@ const _sodium = require('libsodium-wrappers') as typeof import('libsodium-wrappe
 
 export const MAX_MESSAGE_SIZE = 256 * 1024; // 256KB
 
-let sodium: typeof _sodium;
+let sodium: typeof _sodium | undefined;
 
 /**
  * Initialize libsodium. Must be called once before using other crypto functions.
@@ -22,16 +22,17 @@ export interface Keypair {
   privateKey: Uint8Array;
 }
 
-function assertInitialized(): asserts sodium is typeof _sodium {
+function getSodium(): typeof _sodium {
   if (!sodium) throw new Error('Crypto not initialized: call await initCrypto() first');
+  return sodium;
 }
 
 /**
  * Generate an X25519 keypair for key exchange.
  */
 export function generateKeypair(): Keypair {
-  assertInitialized();
-  const kp = sodium.crypto_box_keypair();
+  const s = getSodium();
+  const kp = s.crypto_box_keypair();
   return {
     publicKey: kp.publicKey,
     privateKey: kp.privateKey,
@@ -46,8 +47,8 @@ export function computeSharedSecret(
   theirPublicKey: Uint8Array,
   myPrivateKey: Uint8Array,
 ): Uint8Array {
-  assertInitialized();
-  return sodium.crypto_box_beforenm(theirPublicKey, myPrivateKey);
+  const s = getSodium();
+  return s.crypto_box_beforenm(theirPublicKey, myPrivateKey);
 }
 
 /**
@@ -61,18 +62,18 @@ export function encrypt(
   plaintext: Uint8Array,
   sharedSecret: Uint8Array,
 ): Uint8Array {
-  assertInitialized();
+  const s = getSodium();
   if (plaintext.byteLength > MAX_MESSAGE_SIZE) {
     throw new Error(
       `Message size ${plaintext.byteLength} exceeds maximum ${MAX_MESSAGE_SIZE} bytes`,
     );
   }
 
-  const nonce = sodium.randombytes_buf(
-    sodium.crypto_box_NONCEBYTES, // 24 bytes
+  const nonce = s.randombytes_buf(
+    s.crypto_box_NONCEBYTES, // 24 bytes
   );
 
-  const ciphertext = sodium.crypto_box_easy_afternm(
+  const ciphertext = s.crypto_box_easy_afternm(
     plaintext,
     nonce,
     sharedSecret,
@@ -93,16 +94,16 @@ export function decrypt(
   encrypted: Uint8Array,
   sharedSecret: Uint8Array,
 ): Uint8Array {
-  assertInitialized();
-  const minLength = sodium.crypto_box_NONCEBYTES + sodium.crypto_box_MACBYTES;
+  const s = getSodium();
+  const minLength = s.crypto_box_NONCEBYTES + s.crypto_box_MACBYTES;
   if (encrypted.byteLength < minLength) {
     throw new Error(`Encrypted data too short: ${encrypted.byteLength} bytes, minimum is ${minLength}`);
   }
 
-  const nonceLength = sodium.crypto_box_NONCEBYTES; // 24 bytes
+  const nonceLength = s.crypto_box_NONCEBYTES; // 24 bytes
 
   const nonce = encrypted.slice(0, nonceLength);
   const ciphertext = encrypted.slice(nonceLength);
 
-  return sodium.crypto_box_open_easy_afternm(ciphertext, nonce, sharedSecret);
+  return s.crypto_box_open_easy_afternm(ciphertext, nonce, sharedSecret);
 }
