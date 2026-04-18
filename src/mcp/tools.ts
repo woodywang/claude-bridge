@@ -36,6 +36,7 @@ export interface BridgeState {
   inbox: BridgeMessage[];
   tasks: Map<string, LocalTask>;
   context: Map<string, { value: string; timestamp: number }>;
+  syncCounts: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,6 +118,7 @@ async function updateTaskAndNotify(
   } as ResultPayload);
 
   encryptAndSend(msg, state);
+  state.syncCounts();
   return textResult(`Task ${taskId} updated to ${status}`);
 }
 
@@ -198,6 +200,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         messages = state.inbox.splice(0, maxMessages);
       }
 
+      state.syncCounts();
       return textResult(JSON.stringify({
         count: messages.length,
         remaining: state.inbox.length,

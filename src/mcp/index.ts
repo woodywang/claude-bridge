@@ -15,7 +15,7 @@ import {
 } from '../shared/protocol.js';
 import { BridgeWebSocket } from './websocket.js';
 import { registerTools, type BridgeState, type LocalTask } from './tools.js';
-import { writeToInbox, ensureInboxDir, type InboxEntry } from './inbox.js';
+import { writeToInbox, ensureInboxDir, initCounts, writeCounts, type InboxEntry } from './inbox.js';
 
 async function main(): Promise<void> {
   // -----------------------------------------------------------------------
@@ -40,6 +40,10 @@ async function main(): Promise<void> {
   console.error('[bridge] Initializing crypto...');
   await initCrypto();
   ensureInboxDir();
+
+  // Init counts file in project dir (where MCP server was started from)
+  const projectDir = process.env.BRIDGE_PROJECT_DIR ?? process.cwd();
+  initCounts(projectDir);
 
   // -----------------------------------------------------------------------
   // 3. If host and no code, create room via HTTP POST
@@ -81,7 +85,9 @@ async function main(): Promise<void> {
     inbox: [],
     tasks: new Map(),
     context: new Map(),
+    syncCounts: () => {}, // replaced below after full init
   };
+  state.syncCounts = () => syncCounts(state);
 
   // -----------------------------------------------------------------------
   // 6. Create WebSocket and wire up message handler
@@ -138,6 +144,18 @@ async function main(): Promise<void> {
   console.error(
     `[bridge] Role=${role}, Room=${roomCode}, WS=${ws.connected ? 'connected' : 'disconnected'}`,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Counts sync
+// ---------------------------------------------------------------------------
+
+function syncCounts(state: BridgeState): void {
+  const pendingTasks = [...state.tasks.values()].filter(
+    (t) => t.direction === 'received' && (t.status === 'pending' || t.status === 'ack' || t.status === 'in_progress'),
+  ).length;
+  const unreadChat = state.inbox.length;
+  writeCounts({ unreadChat, pendingTasks, total: unreadChat + pendingTasks });
 }
 
 // ---------------------------------------------------------------------------
@@ -350,6 +368,7 @@ function handleEncryptedMessage(
         break;
     }
 
+    syncCounts(state);
     console.error(
       `[bridge] Received message: type=${message.type}, id=${message.id}`,
     );

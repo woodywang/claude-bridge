@@ -1,5 +1,6 @@
 // Writes incoming messages to ~/.claude-bridge/inbox.json for hook pickup
 // Read by the UserPromptSubmit hook script
+// Also writes counts.json to project dir for status line display
 
 import { mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'fs';
 import { homedir } from 'os';
@@ -61,6 +62,49 @@ export function clearInbox(inboxFile: string = INBOX_FILE): void {
  * Atomically read and clear the inbox using rename.
  * Prevents race condition between hook reader and MCP writer.
  */
+// ---------------------------------------------------------------------------
+// Counts file (written to project dir for status line)
+// ---------------------------------------------------------------------------
+
+export interface BridgeCounts {
+  unreadChat: number;
+  pendingTasks: number;
+  total: number;
+}
+
+let countsPath: string | null = null;
+
+export function initCounts(projectDir: string): void {
+  const dir = join(projectDir, '.claude-bridge');
+  mkdirSync(dir, { recursive: true });
+  countsPath = join(dir, 'counts.json');
+  // Write initial zero counts
+  writeCounts({ unreadChat: 0, pendingTasks: 0, total: 0 });
+}
+
+export function writeCounts(counts: BridgeCounts): void {
+  if (!countsPath) return;
+  try {
+    writeFileSync(countsPath, JSON.stringify(counts));
+  } catch { /* best-effort */ }
+}
+
+export function readCounts(projectDir?: string): BridgeCounts {
+  const file = projectDir
+    ? join(projectDir, '.claude-bridge', 'counts.json')
+    : countsPath;
+  if (!file) return { unreadChat: 0, pendingTasks: 0, total: 0 };
+  try {
+    return JSON.parse(readFileSync(file, 'utf-8')) as BridgeCounts;
+  } catch {
+    return { unreadChat: 0, pendingTasks: 0, total: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Atomic inbox read+clear
+// ---------------------------------------------------------------------------
+
 export function readAndClearInbox(inboxDir?: string): InboxEntry[] {
   const dir = inboxDir ?? INBOX_DIR;
   const file = join(dir, 'inbox.json');
