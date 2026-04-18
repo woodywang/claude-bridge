@@ -92,8 +92,9 @@ Create `~/.claude/commands/bridge-recv.md`:
 | Tool | Description |
 |------|-------------|
 | `bridge_send(title, body)` | Broadcast encrypted message to all peers |
-| `bridge_inbox()` | List messages with read/unread status, sender names |
-| `bridge_read(id)` | Read full message, mark as read |
+| `bridge_inbox()` | List messages with read/unread status, sender names (sorted by server seqId) |
+| `bridge_read(id)` | Read full message (does NOT mark as read) |
+| `bridge_mark_read(ids)` | Mark messages as read after human review |
 | `bridge_draft_reply(id, draft_body, suggested_cc?)` | Draft reply for human review (does NOT send) |
 | `bridge_reply(id, body, cc?, cc_context?)` | Send confirmed reply to sender, optionally CC others |
 
@@ -128,7 +129,7 @@ Replies follow a **draft → confirm → send** flow to ensure the human stays i
 4. Main agent presents draft to human
    → human confirms, edits, or chooses CC recipients
    ↓
-5. Main agent sends (bridge_reply)
+5. Main agent sends (bridge_reply) + marks read (bridge_mark_read)
    → reply to original sender (targeted, not broadcast)
    → CC copies to specified peers with extra context
 ```
@@ -155,7 +156,7 @@ The status line shows unread message count (`📨 N`), updated on each interacti
 ```bash
 npm install
 npm run build                                  # compile TypeScript
-npm test                                       # all tests (60 unit + integration)
+npm test                                       # all tests (63 unit + integration)
 npx vitest run --exclude 'src/integration/**'  # unit only
 npx tsc --noEmit                               # type-check Node code
 npx tsc --noEmit -p tsconfig.worker.json       # type-check Worker code
@@ -181,12 +182,13 @@ bin/
 - Each recipient gets a separately encrypted copy (no shared group key)
 - Targeted replies: only the intended recipient(s) can decrypt
 - DO is zero-knowledge: stores only encrypted blobs + public keys
+- Persistent identity: keypair saved to `~/.claude-bridge/identity.json` (mode 0600), stable across restarts
 - Identity: BLAKE2b fingerprint of public key (8 hex chars) + user-configured alias
+- Server-assigned monotonic seqId for message ordering (no client clock dependency)
 - Max message size: 256KB before encryption
 
 **Known limitations:**
 - No MITM protection (relay could substitute pubkeys). Self-hosted only until out-of-band verification is added.
-- No message deduplication on chat messages
 - No TTL on queued DO messages (count-based 1000 cap only)
 
 ## License

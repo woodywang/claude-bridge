@@ -17,7 +17,9 @@ Claude A ←stdio→ MCP Server ←WSS→ CF Durable Object (relay) ←WSS→ MC
 - **DO maintains member registry**: fingerprint, publicKey, name, online status.
 - **MCP Server (single process)**: stdio for Claude Code + WebSocket to DO. Computes pairwise shared secrets on connect.
 - **Pairwise encryption**: each message encrypted separately per recipient (X25519 DH + XSalsa20-Poly1305). Wire format: `{from: fingerprint, recipients: {fp: blob, ...}}`.
-- **Targeted sending**: `encryptAndSendTo` sends to specific peers (used for replies). `encryptAndSend` broadcasts to all.
+- **Targeted sending**: `encryptAndSend(msg, state, targets?)` sends to specific peers when targets provided, broadcasts otherwise.
+- **Server-side ordering**: DO assigns a monotonic `seqId` to each relayed message. Clients use seqId for inbox sorting, context conflict resolution (last-write-wins), gap detection, and dedup. Client timestamps are for display only.
+- **Persistent identity**: Keypair saved to `~/.claude-bridge/identity.json`. Fingerprint survives process restarts.
 - **Two tsconfigs**: `tsconfig.json` for Node code (NodeNext), `tsconfig.worker.json` for CF Worker (bundler).
 
 ## Identity & Alias
@@ -31,7 +33,7 @@ Replies follow a **draft → human confirm → send** flow:
 1. Sub-agent reads message via `bridge_read`, drafts reply via `bridge_draft_reply`
 2. Sub-agent returns draft to main agent, which presents it to the human
 3. Human confirms/edits content, chooses CC recipients
-4. Main agent calls `bridge_reply(id, body, cc?, cc_context?)` to send
+4. Main agent calls `bridge_reply(id, body, cc?, cc_context?)` to send, then `bridge_mark_read` to mark as read
 5. Reply goes to original sender only (targeted); CC copies go to specified peers with context
 
 **Never skip the human confirmation step.**
@@ -44,7 +46,7 @@ Incoming messages trigger a `UserPromptSubmit` hook. The hook instructs Claude t
 
 ```bash
 npm run build                               # compile TypeScript to dist/
-npm test                                    # unit tests (60 tests)
+npm test                                    # unit tests (63 tests)
 npx vitest run --exclude 'src/integration/**'  # unit only (skip wrangler)
 npx vitest run src/shared/crypto.test.ts    # single test file
 npx tsc --noEmit                            # type-check Node code
@@ -79,8 +81,9 @@ npx wrangler deploy                         # deploy to Cloudflare
 
 **Messaging:**
 - `bridge_send(title, body)` — broadcast to all peers
-- `bridge_inbox()` — list messages with read/unread, sender names
-- `bridge_read(id)` — read full message, mark as read
+- `bridge_inbox()` — list messages with read/unread, sender names (sorted by server seqId)
+- `bridge_read(id)` — read full message (does NOT mark as read)
+- `bridge_mark_read(ids)` — mark messages as read after human review
 - `bridge_draft_reply(id, draft_body, suggested_cc?)` — draft reply for human review (does NOT send)
 - `bridge_reply(id, body, cc?, cc_context?)` — send confirmed reply; targeted to sender, optional CC
 
@@ -96,8 +99,8 @@ npx wrangler deploy                         # deploy to Cloudflare
 ## Data Flow
 
 1. Claude calls MCP tool → `tools.ts`
-2. `encryptAndSend` (broadcast) or `encryptAndSendTo` (targeted) → WebSocket relay
-3. DO broadcasts to recipients → peer MCP servers decrypt
+2. `encryptAndSend` (broadcast or targeted) → WebSocket relay
+3. DO assigns monotonic seqId, broadcasts to recipients → peer MCP servers decrypt
 4. `handleDecryptedMessage` dispatches: chat → inbox + hook file, task → tasks + hook file
 5. Hook reads `~/.claude-bridge/inbox.json` on next user input → injects into prompt
 6. Claude spawns sub-agent to process messages → draft → human confirm → send
