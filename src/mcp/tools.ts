@@ -87,49 +87,20 @@ function requireConnected(state: BridgeState): ReturnType<typeof errorResult> | 
 // ---------------------------------------------------------------------------
 
 /**
- * Helper: encrypt a BridgeMessage and send via WebSocket relay.
- * Encrypts separately for each peer (pairwise encryption).
- * Returns the serialized byte length and recipient count.
+ * Encrypt a BridgeMessage and send via WebSocket relay.
+ * If targetFingerprints is provided, sends only to those peers (targeted reply/CC).
+ * Otherwise broadcasts to all peers.
  */
 function encryptAndSend(
   msg: BridgeMessage,
   state: BridgeState,
+  targetFingerprints?: string[],
 ): { plaintextBytes: number; recipientCount: number } {
   const serialized = serializeMessage(msg);
-
-  // Encrypt separately for each peer
-  const recipients: Record<string, string> = {};
-  for (const [fp, peer] of state.peers) {
-    const encrypted = encrypt(serialized, peer.sharedSecret);
-    recipients[fp] = Buffer.from(encrypted).toString('base64');
-  }
-
-  const envelope = JSON.stringify({
-    type: 'relay',
-    payload: {
-      dataType: 'encrypted',
-      from: state.myFingerprint,
-      recipients,
-    },
-  });
-  state.ws.send(envelope);
-
-  return { plaintextBytes: serialized.byteLength, recipientCount: Object.keys(recipients).length };
-}
-
-/**
- * Helper: encrypt a BridgeMessage and send to specific peers only.
- * Used for targeted replies and CC.
- */
-function encryptAndSendTo(
-  msg: BridgeMessage,
-  state: BridgeState,
-  targetFingerprints: string[],
-): { plaintextBytes: number; recipientCount: number } {
-  const serialized = serializeMessage(msg);
+  const targets = targetFingerprints ?? [...state.peers.keys()];
 
   const recipients: Record<string, string> = {};
-  for (const fp of targetFingerprints) {
+  for (const fp of targets) {
     const peer = state.peers.get(fp);
     if (!peer) continue;
     const encrypted = encrypt(serialized, peer.sharedSecret);
@@ -284,15 +255,19 @@ export function registerTools(server: McpServer, state: BridgeState): void {
     },
   );
 
-  // bridge_send — encrypt and send a titled message to the peer
+  // bridge_send — encrypt and send a titled message
   server.tool(
     'bridge_send',
-    'Send an encrypted message (with title and body) to the peer through the bridge',
+    'Send an encrypted message. Broadcasts to all peers by default, or specify recipients by name/fingerprint for private messages.',
     {
       title: z.string().describe('Message title / subject'),
       body: z.string().describe('Message body'),
+      to: z
+        .array(z.string())
+        .optional()
+        .describe('Recipient names or fingerprints. Omit to broadcast to all peers.'),
     },
-    async ({ title, body }) => {
+    async ({ title, body, to }) => {
       const err = requireConnected(state);
       if (err) return err;
 
@@ -302,9 +277,32 @@ export function registerTools(server: McpServer, state: BridgeState): void {
           body,
         } satisfies ChatPayload);
 
-        encryptAndSend(msg, state);
+        let targets: string[] | undefined;
+        const sentTo: string[] = [];
+        const notFound: string[] = [];
 
-        return textResult(`Sent: ${title}`);
+        if (to && to.length > 0) {
+          targets = [];
+          for (const nameOrFp of to) {
+            const peer = findPeerByNameOrFp(state, nameOrFp);
+            if (peer) {
+              targets.push(peer.fingerprint);
+              sentTo.push(peerDisplayName(state, peer.fingerprint));
+            } else {
+              notFound.push(nameOrFp);
+            }
+          }
+          if (targets.length === 0) {
+            return errorResult(`No valid recipients found: ${notFound.join(', ')}`);
+          }
+        }
+
+        encryptAndSend(msg, state, targets);
+
+        const recipientDesc = targets
+          ? sentTo.join(', ') + (notFound.length > 0 ? `. Not found: ${notFound.join(', ')}` : '')
+          : 'all peers';
+        return textResult(`Sent "${title}" to ${recipientDesc}`);
       } catch (e) {
         return errorResult(`Error sending message: ${(e as Error).message}`);
       }
@@ -489,7 +487,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
           replyTo: original.id,
         } satisfies ChatPayload);
 
-        encryptAndSendTo(replyMsg, state, [original.from]);
+        encryptAndSend(replyMsg, state, [original.from]);
         const sentTo = [peerDisplayName(state, original.from)];
 
         // Send CC copies to other peers if specified
@@ -517,7 +515,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
               replyTo: original.id,
             } satisfies ChatPayload);
 
-            encryptAndSendTo(ccMsg, state, ccFingerprints);
+            encryptAndSend(ccMsg, state, ccFingerprints);
 
             for (const fp of ccFingerprints) {
               ccSentTo.push(peerDisplayName(state, fp));
