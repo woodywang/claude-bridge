@@ -27,13 +27,23 @@ export interface LocalTask {
   direction: 'sent' | 'received'; // did we send or receive this task?
 }
 
+export interface InboxMessage {
+  id: string;
+  title: string;
+  body: string;
+  from: string;
+  timestamp: number;
+  read: boolean;
+  replyTo?: string;
+}
+
 export interface BridgeState {
   role: 'host' | 'peer';
   roomCode: string;
   ws: BridgeWebSocket;
   keypair: Keypair;
   sharedSecret: Uint8Array | null;
-  inbox: BridgeMessage[];
+  inbox: Map<string, InboxMessage>;
   tasks: Map<string, LocalTask>;
   context: Map<string, { value: string; timestamp: number }>;
   syncCounts: () => void;
@@ -123,6 +133,38 @@ async function updateTaskAndNotify(
 }
 
 // ---------------------------------------------------------------------------
+// Helper: relative time formatting
+// ---------------------------------------------------------------------------
+
+function formatRelativeTime(timestamp: number): string {
+  const diffMs = Date.now() - timestamp;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return `${diffSec}s ago`;
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
+// ---------------------------------------------------------------------------
+// Helper: find message by full or partial ID
+// ---------------------------------------------------------------------------
+
+function findMessageById(state: BridgeState, id: string): InboxMessage | undefined {
+  // Try exact match first
+  const exact = state.inbox.get(id);
+  if (exact) return exact;
+
+  // Try partial match (first 8 chars)
+  for (const [key, msg] of state.inbox) {
+    if (key.startsWith(id)) return msg;
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -133,79 +175,138 @@ export function registerTools(server: McpServer, state: BridgeState): void {
     'Returns the current status of the bridge connection',
     {},
     async () => {
+      const unread = [...state.inbox.values()].filter((m) => !m.read).length;
       return textResult(JSON.stringify({
         role: state.role,
         roomCode: state.roomCode,
         wsConnected: state.ws.connected,
         keyExchangeDone: state.sharedSecret !== null,
-        pendingMessages: state.inbox.length,
+        inboxTotal: state.inbox.size,
+        inboxUnread: unread,
       }, null, 2));
     },
   );
 
-  // bridge_send_message — encrypt and send a chat message to the peer
+  // bridge_send — encrypt and send a titled message to the peer
   server.tool(
-    'bridge_send_message',
-    'Send an encrypted message to the peer through the bridge',
+    'bridge_send',
+    'Send an encrypted message (with title and body) to the peer through the bridge',
     {
-      content: z.string().describe('The message content to send'),
+      title: z.string().describe('Message title / subject'),
+      body: z.string().describe('Message body'),
     },
-    async ({ content }) => {
+    async ({ title, body }) => {
       const err = requireConnected(state);
       if (err) return err;
 
       try {
         const msg = createBridgeMessage('chat', state.role, {
-          content,
+          title,
+          body,
         } satisfies ChatPayload);
 
-        const { plaintextBytes, blobLength } = encryptAndSend(msg, state);
+        encryptAndSend(msg, state);
 
-        return textResult(
-          `Message sent (${plaintextBytes} bytes plaintext, ${blobLength} bytes encrypted+base64, id=${msg.id})`,
-        );
+        return textResult(`Sent: ${title}`);
       } catch (e) {
         return errorResult(`Error sending message: ${(e as Error).message}`);
       }
     },
   );
 
-  // bridge_get_messages — retrieve pending messages from inbox
+  // bridge_inbox — list all messages in the inbox
   server.tool(
-    'bridge_get_messages',
-    'Get pending incoming chat messages from the peer. Messages are removed from the inbox once returned (consume-once). For tasks, use bridge_get_tasks instead.',
-    {
-      since: z
-        .string()
-        .optional()
-        .describe('Only return messages after this message ID'),
-      limit: z
-        .number()
-        .optional()
-        .describe('Maximum number of messages to return (default 50)'),
-    },
-    async ({ since, limit }) => {
-      const maxMessages = limit ?? 50;
+    'bridge_inbox',
+    'List all messages in the inbox (newest first). Shows read/unread status, short ID, sender, title, and relative time.',
+    {},
+    async () => {
+      const messages = [...state.inbox.values()].sort((a, b) => b.timestamp - a.timestamp);
+      const unread = messages.filter((m) => !m.read).length;
 
-      let messages: BridgeMessage[];
-      if (since) {
-        const idx = state.inbox.findIndex((m) => m.id === since);
-        if (idx === -1) {
-          messages = state.inbox.splice(0, maxMessages);
-        } else {
-          state.inbox.splice(0, idx + 1);
-          messages = state.inbox.splice(0, maxMessages);
-        }
-      } else {
-        messages = state.inbox.splice(0, maxMessages);
+      if (messages.length === 0) {
+        return textResult('📬 Inbox is empty.');
       }
 
+      const lines = messages.map((m) => {
+        const readMarker = m.read ? '[ ]' : '[●]';
+        const idShort = m.id.substring(0, 8);
+        const timeRel = formatRelativeTime(m.timestamp);
+        return `  ${readMarker} ${idShort} | ${m.from} | ${m.title} | ${timeRel}`;
+      });
+
+      const header = `📬 ${messages.length} messages (${unread} unread)`;
+      return textResult([header, '', ...lines].join('\n'));
+    },
+  );
+
+  // bridge_read — read a specific message by ID (full or partial)
+  server.tool(
+    'bridge_read',
+    'Read a specific message by its full or partial (8-char) ID. Marks the message as read.',
+    {
+      id: z.string().describe('Full or partial (first 8 chars) message ID'),
+    },
+    async ({ id }) => {
+      const message = findMessageById(state, id);
+      if (!message) {
+        return errorResult(`Message not found: ${id}`);
+      }
+
+      message.read = true;
       state.syncCounts();
-      return textResult(JSON.stringify({
-        count: messages.length,
-        remaining: state.inbox.length,
-        messages,
-      }, null, 2));
+
+      const date = new Date(message.timestamp);
+      const dateStr = date.toISOString().replace('T', ' ').substring(0, 16);
+
+      const parts = [
+        `From: ${message.from}`,
+        `Date: ${dateStr}`,
+        `Title: ${message.title}`,
+        '',
+        message.body,
+        '',
+        '---',
+        `Reply with: bridge_reply ${message.id.substring(0, 8)} <your reply body>`,
+      ];
+
+      return textResult(parts.join('\n'));
+    },
+  );
+
+  // bridge_reply — reply to a specific message
+  server.tool(
+    'bridge_reply',
+    'Reply to a message. Sends a new message with "Re: <original_title>" as title.',
+    {
+      id: z.string().describe('Full or partial (first 8 chars) message ID to reply to'),
+      body: z.string().describe('Reply body text'),
+    },
+    async ({ id, body }) => {
+      const err = requireConnected(state);
+      if (err) return err;
+
+      const original = findMessageById(state, id);
+      if (!original) {
+        return errorResult(`Message not found: ${id}`);
+      }
+
+      try {
+        const reTitle = original.title.startsWith('Re: ')
+          ? original.title
+          : `Re: ${original.title}`;
+
+        const msg = createBridgeMessage('chat', state.role, {
+          title: reTitle,
+          body,
+          replyTo: original.id,
+        } satisfies ChatPayload);
+
+        encryptAndSend(msg, state);
+
+        return textResult(`Replied to "${original.title}": ${reTitle}`);
+      } catch (e) {
+        return errorResult(`Error sending reply: ${(e as Error).message}`);
+      }
     },
   );
 

@@ -40,8 +40,9 @@ export type ResultPayload = {
 };
 
 export type ChatPayload = {
-  content: string;
-  replyTo?: string;
+  title: string;
+  body: string;
+  replyTo?: string;  // message ID being replied to
 };
 
 export type BridgeMessageType = 'task' | 'context' | 'result' | 'chat';

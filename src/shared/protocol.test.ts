@@ -102,7 +102,8 @@ describe('protocol — data plane round-trip', () => {
     const msg = makeMessage({
       type: 'chat',
       payload: {
-        content: 'Hello from the other side',
+        title: 'Hello',
+        body: 'Hello from the other side',
         replyTo: 'msg-999',
       } satisfies ChatPayload,
     });
@@ -115,7 +116,8 @@ describe('protocol — data plane round-trip', () => {
     const msg = makeMessage({
       type: 'chat',
       payload: {
-        content: 'Standalone message',
+        title: 'Standalone',
+        body: 'Standalone message',
       } satisfies ChatPayload,
     });
     const bytes = serializeMessage(msg);
@@ -219,13 +221,13 @@ describe('protocol — max message size', () => {
     // We overshoot then trim.
     const base = makeMessage({
       type: 'chat',
-      payload: { content: '' } satisfies ChatPayload,
+      payload: { title: 'T', body: '' } satisfies ChatPayload,
     });
     const baseJson = JSON.stringify(base);
-    // The content field is "", so we need to fill it to reach MAX_MESSAGE_SIZE.
-    // baseJson includes `"content":""`, so adding chars inside the string grows 1:1 in bytes.
+    // The body field is "", so we need to fill it to reach MAX_MESSAGE_SIZE.
+    // baseJson includes `"body":""`, so adding chars inside the string grows 1:1 in bytes.
     const padding = MAX_MESSAGE_SIZE - new TextEncoder().encode(baseJson).byteLength;
-    (base.payload as ChatPayload).content = 'x'.repeat(padding);
+    (base.payload as ChatPayload).body = 'x'.repeat(padding);
 
     const bytes = serializeMessage(base);
     expect(bytes.byteLength).toBe(MAX_MESSAGE_SIZE);
@@ -234,12 +236,12 @@ describe('protocol — max message size', () => {
   it('throws when serialized message exceeds MAX_MESSAGE_SIZE', () => {
     const base = makeMessage({
       type: 'chat',
-      payload: { content: '' } satisfies ChatPayload,
+      payload: { title: 'T', body: '' } satisfies ChatPayload,
     });
     const baseJson = JSON.stringify(base);
     const padding =
       MAX_MESSAGE_SIZE - new TextEncoder().encode(baseJson).byteLength + 1;
-    (base.payload as ChatPayload).content = 'x'.repeat(padding);
+    (base.payload as ChatPayload).body = 'x'.repeat(padding);
 
     expect(() => serializeMessage(base)).toThrow(/exceeds maximum/);
   });
@@ -359,7 +361,8 @@ describe('protocol — createBridgeMessage factory', () => {
 
   it('sets protocolVersion to PROTOCOL_VERSION', () => {
     const msg = createBridgeMessage('chat', 'fp-abc', {
-      content: 'hi',
+      title: 'Greeting',
+      body: 'hi',
     } satisfies ChatPayload);
 
     expect(msg.protocolVersion).toBe(PROTOCOL_VERSION);
@@ -391,8 +394,8 @@ describe('protocol — createBridgeMessage factory', () => {
   });
 
   it('generates unique ids across calls', () => {
-    const msg1 = createBridgeMessage('chat', 'fp', { content: 'a' });
-    const msg2 = createBridgeMessage('chat', 'fp', { content: 'b' });
+    const msg1 = createBridgeMessage('chat', 'fp', { title: 'A', body: 'a' });
+    const msg2 = createBridgeMessage('chat', 'fp', { title: 'B', body: 'b' });
     expect(msg1.id).not.toBe(msg2.id);
   });
 });

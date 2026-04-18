@@ -9,12 +9,13 @@ import {
 import {
   deserializeMessage,
   type BridgeMessage,
+  type ChatPayload,
   type TaskPayload,
   type ResultPayload,
   type ContextPayload,
 } from '../shared/protocol.js';
 import { BridgeWebSocket } from './websocket.js';
-import { registerTools, type BridgeState, type LocalTask } from './tools.js';
+import { registerTools, type BridgeState, type InboxMessage, type LocalTask } from './tools.js';
 import { writeToInbox, ensureInboxDir, initCounts, writeCounts, type InboxEntry } from './inbox.js';
 
 async function main(): Promise<void> {
@@ -82,7 +83,7 @@ async function main(): Promise<void> {
     ws: null!, // set below after creating WebSocket
     keypair,
     sharedSecret: null,
-    inbox: [],
+    inbox: new Map(),
     tasks: new Map(),
     context: new Map(),
     syncCounts: () => {}, // replaced below after full init
@@ -157,7 +158,7 @@ function syncCounts(state: BridgeState): void {
   const pendingTasks = [...state.tasks.values()].filter(
     (t) => t.direction === 'received' && (t.status === 'pending' || t.status === 'ack' || t.status === 'in_progress'),
   ).length;
-  const unreadChat = state.inbox.length;
+  const unreadChat = [...state.inbox.values()].filter((m) => !m.read).length;
   writeCounts({ unreadChat, pendingTasks, total: unreadChat + pendingTasks });
 }
 
@@ -352,9 +353,20 @@ function handleEncryptedMessage(
       }
 
       case 'chat':
-      default:
-        // Push to inbox for bridge_get_messages consumption
-        state.inbox.push(message);
+      default: {
+        const chatPayload = message.payload as ChatPayload;
+
+        // Create InboxMessage and store in map
+        const inboxMsg: InboxMessage = {
+          id: message.id,
+          title: chatPayload.title,
+          body: chatPayload.body,
+          from: message.from,
+          timestamp: message.timestamp,
+          read: false,
+          replyTo: chatPayload.replyTo,
+        };
+        state.inbox.set(message.id, inboxMsg);
 
         // Write to inbox file for hook pickup
         const chatInboxEntry: InboxEntry = {
@@ -364,11 +376,12 @@ function handleEncryptedMessage(
           timestamp: message.timestamp,
           summary:
             message.type === 'chat'
-              ? (message.payload as { content: string }).content
+              ? chatPayload.title
               : JSON.stringify(message.payload),
         };
         writeToInbox(chatInboxEntry);
         break;
+      }
     }
 
     syncCounts(state);

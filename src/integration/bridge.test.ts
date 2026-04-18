@@ -286,7 +286,8 @@ describe('Bridge Integration Tests', () => {
 
       // Side A sends a chat message to side B
       const chatMsg = createBridgeMessage('chat', 'sideA', {
-        content: 'Hello from A!',
+        title: 'Greeting',
+        body: 'Hello from A!',
       });
 
       const bReceives = waitForMessage(wsB, (msg) => msg.type === 'relay');
@@ -300,11 +301,13 @@ describe('Bridge Integration Tests', () => {
 
       expect(decoded.type).toBe('chat');
       expect(decoded.from).toBe('sideA');
-      expect((decoded.payload as { content: string }).content).toBe('Hello from A!');
+      expect((decoded.payload as { title: string; body: string }).title).toBe('Greeting');
+      expect((decoded.payload as { title: string; body: string }).body).toBe('Hello from A!');
 
       // Round-trip: side B sends back to side A
       const replyMsg = createBridgeMessage('chat', 'sideB', {
-        content: 'Hello from B!',
+        title: 'Re: Greeting',
+        body: 'Hello from B!',
         replyTo: chatMsg.id,
       });
 
@@ -320,11 +323,11 @@ describe('Bridge Integration Tests', () => {
 
       expect(replyDecoded.type).toBe('chat');
       expect(replyDecoded.from).toBe('sideB');
-      expect((replyDecoded.payload as { content: string; replyTo?: string }).content).toBe(
+      expect((replyDecoded.payload as { title: string; body: string; replyTo?: string }).body).toBe(
         'Hello from B!',
       );
       expect(
-        (replyDecoded.payload as { content: string; replyTo?: string }).replyTo,
+        (replyDecoded.payload as { title: string; body: string; replyTo?: string }).replyTo,
       ).toBe(chatMsg.id);
 
       wsA.close();
@@ -417,7 +420,7 @@ describe('Bridge Integration Tests', () => {
       const { secretA, secretB } = await doKeyExchange(wsA, wsB, kpA, kpB);
 
       // Side A sends a message while B is connected
-      const msg1 = createBridgeMessage('chat', 'sideA', { content: 'Message 1' });
+      const msg1 = createBridgeMessage('chat', 'sideA', { title: 'First', body: 'Message 1' });
       const bReceivesMsg1 = waitForMessage(wsB, (msg) => msg.type === 'relay');
       sendEncrypted(wsA, msg1, secretA);
 
@@ -430,7 +433,7 @@ describe('Bridge Integration Tests', () => {
       await sleep(500); // Give time for close to propagate
 
       // Side A sends another message while B is offline
-      const msg2 = createBridgeMessage('chat', 'sideA', { content: 'Message 2 (while B offline)' });
+      const msg2 = createBridgeMessage('chat', 'sideA', { title: 'Second', body: 'Message 2 (while B offline)' });
       sendRelay(wsA, Buffer.from(encrypt(serializeMessage(msg2), secretA)).toString('base64'));
 
       await sleep(200); // Give time for the message to be stored
@@ -459,7 +462,7 @@ describe('Bridge Integration Tests', () => {
       );
 
       expect(missedDecrypted.type).toBe('chat');
-      expect((missedDecrypted.payload as { content: string }).content).toBe(
+      expect((missedDecrypted.payload as { title: string; body: string }).body).toBe(
         'Message 2 (while B offline)',
       );
 
