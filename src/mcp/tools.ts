@@ -343,7 +343,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
   // bridge_read — read a specific message by ID (full or partial)
   server.tool(
     'bridge_read',
-    'Read a specific message by its full or partial (8-char) ID. Marks the message as read.',
+    'Read a specific message by its full or partial (8-char) ID. Does NOT mark as read — call bridge_mark_read after the human has reviewed.',
     {
       id: z.string().describe('Full or partial (first 8 chars) message ID'),
     },
@@ -352,9 +352,6 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       if (!message) {
         return errorResult(`Message not found: ${id}`);
       }
-
-      message.read = true;
-      state.syncCounts();
 
       const date = new Date(message.timestamp);
       const dateStr = date.toISOString().replace('T', ' ').substring(0, 16);
@@ -368,10 +365,41 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         message.body,
         '',
         '---',
-        `Reply with: bridge_reply ${message.id.substring(0, 8)} <your reply body>`,
+        `Mark as read: bridge_mark_read ${message.id.substring(0, 8)}`,
+        `Reply: bridge_draft_reply ${message.id.substring(0, 8)} <draft>`,
       ];
 
       return textResult(parts.join('\n'));
+    },
+  );
+
+  // bridge_mark_read — mark one or more messages as read
+  server.tool(
+    'bridge_mark_read',
+    'Mark one or more messages as read. Call this after the human has reviewed the message content.',
+    {
+      ids: z.array(z.string()).describe('Full or partial message IDs to mark as read'),
+    },
+    async ({ ids }) => {
+      const marked: string[] = [];
+      const notFound: string[] = [];
+
+      for (const id of ids) {
+        const message = findMessageById(state, id);
+        if (message) {
+          message.read = true;
+          marked.push(message.id.substring(0, 8));
+        } else {
+          notFound.push(id);
+        }
+      }
+
+      state.syncCounts();
+
+      if (notFound.length > 0) {
+        return textResult(`Marked ${marked.length} as read. Not found: ${notFound.join(', ')}`);
+      }
+      return textResult(`Marked ${marked.length} as read: ${marked.join(', ')}`);
     },
   );
 
