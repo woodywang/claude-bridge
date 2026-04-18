@@ -5,8 +5,16 @@ import type { Env } from './env.js';
 // Types
 // ---------------------------------------------------------------------------
 
+interface MemberInfo {
+  fingerprint: string;
+  publicKey: string;  // base64
+  name?: string;      // optional display name
+  joinedAt: number;
+  online: boolean;
+}
+
 interface SocketAttachment {
-  role?: 'host' | 'peer';
+  fingerprint?: string;
   joinedAt: number;
 }
 
@@ -31,6 +39,15 @@ export class BridgeRoom extends DurableObject<Env> {
    * Handle incoming HTTP requests (WebSocket upgrade).
    */
   async fetch(request: Request): Promise<Response> {
+    // HTTP GET /members — return member list as JSON
+    const url = new URL(request.url);
+    if (url.pathname === '/members' && request.method === 'GET') {
+      const members = (await this.ctx.storage.get<MemberInfo[]>('members')) ?? [];
+      return new Response(JSON.stringify({ members }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const upgradeHeader = request.headers.get('Upgrade');
     if (upgradeHeader !== 'websocket') {
       return new Response('Expected WebSocket upgrade', { status: 426 });
@@ -52,9 +69,9 @@ export class BridgeRoom extends DurableObject<Env> {
   /**
    * Handle incoming WebSocket messages.
    *
-   * Key exchange travels as relay messages with opaque payloads.
-   * The DO never handles key_exchange directly — zero-knowledge by design.
-   * Clients send: { type: 'relay', payload: { controlType: 'key_exchange', publicKey: '...' } }
+   * Clients register via { type: 'register', fingerprint, publicKey }.
+   * The DO stores the member registry and distributes public keys.
+   * Encrypted data still travels as relay messages — opaque to the DO.
    */
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== 'string') {
@@ -73,8 +90,8 @@ export class BridgeRoom extends DurableObject<Env> {
     const type = parsed.type;
 
     switch (type) {
-      case 'join':
-        await this.handleJoin(ws, parsed);
+      case 'register':
+        await this.handleRegister(ws, parsed);
         break;
       case 'relay':
         await this.handleRelay(ws, parsed);
@@ -92,15 +109,29 @@ export class BridgeRoom extends DurableObject<Env> {
    * Handle WebSocket close — notify remaining peers.
    */
   async webSocketClose(ws: WebSocket, _code: number, _reason: string, _wasClean: boolean): Promise<void> {
-    const sockets = this.ctx.getWebSockets();
-    const notification = JSON.stringify({ type: 'peer_disconnected' });
+    // Read fingerprint from socket attachment
+    const attachment = ws.deserializeAttachment() as SocketAttachment | null;
+    const fp = attachment?.fingerprint;
 
-    for (const socket of sockets) {
-      if (socket !== ws) {
-        try {
-          socket.send(notification);
-        } catch {
-          // Socket may already be closed
+    if (fp) {
+      // Mark member offline in storage (don't delete — offline members still have valid public keys)
+      const members = (await this.ctx.storage.get<MemberInfo[]>('members')) ?? [];
+      const member = members.find((m) => m.fingerprint === fp);
+      if (member) {
+        member.online = false;
+        await this.ctx.storage.put('members', members);
+      }
+
+      // Broadcast member_left to remaining sockets
+      const notification = JSON.stringify({ type: 'member_left', fingerprint: fp });
+      const sockets = this.ctx.getWebSockets();
+      for (const socket of sockets) {
+        if (socket !== ws) {
+          try {
+            socket.send(notification);
+          } catch {
+            // Socket may already be closed
+          }
         }
       }
     }
@@ -118,20 +149,40 @@ export class BridgeRoom extends DurableObject<Env> {
   // Message handlers
   // -------------------------------------------------------------------------
 
-  private async handleJoin(ws: WebSocket, parsed: Record<string, unknown>): Promise<void> {
-    const role = parsed.role;
-    if (role !== 'host' && role !== 'peer') {
-      ws.send(JSON.stringify({ type: 'error', message: 'Invalid role, must be "host" or "peer"' }));
+  private async handleRegister(ws: WebSocket, parsed: Record<string, unknown>): Promise<void> {
+    const fp = parsed.fingerprint;
+    const publicKey = parsed.publicKey;
+    if (typeof fp !== 'string' || typeof publicKey !== 'string') {
+      ws.send(JSON.stringify({ type: 'error', message: 'register requires fingerprint and publicKey' }));
       return;
     }
+    const name = typeof parsed.name === 'string' ? parsed.name : undefined;
 
-    // Update attachment with role
+    // Store/update in members registry
+    let members = (await this.ctx.storage.get<MemberInfo[]>('members')) ?? [];
+    const existing = members.find((m) => m.fingerprint === fp);
+    const memberInfo: MemberInfo = existing
+      ? { ...existing, publicKey, name: name ?? existing.name, online: true }
+      : { fingerprint: fp, publicKey, name, joinedAt: Date.now(), online: true };
+
+    if (existing) {
+      members = members.map((m) => (m.fingerprint === fp ? memberInfo : m));
+    } else {
+      members.push(memberInfo);
+    }
+
+    await this.ctx.storage.put('members', members);
+
+    // Store fingerprint in socket attachment so we know who disconnects
     const attachment: SocketAttachment = ws.deserializeAttachment() ?? { joinedAt: Date.now() };
-    attachment.role = role;
+    attachment.fingerprint = fp;
     ws.serializeAttachment(attachment);
 
-    // Broadcast peer_joined to all other sockets
-    const notification = JSON.stringify({ type: 'peer_joined', role });
+    // Send the FULL member list back to the registering client
+    ws.send(JSON.stringify({ type: 'members', members }));
+
+    // Broadcast member_joined to all OTHER sockets
+    const notification = JSON.stringify({ type: 'member_joined', member: memberInfo });
     const sockets = this.ctx.getWebSockets();
     for (const socket of sockets) {
       if (socket !== ws) {

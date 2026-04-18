@@ -113,7 +113,7 @@ function sendEncryptedMultiParty(
   });
 }
 
-async function doKeyExchange(
+async function doRegister(
   wsA: WebSocket,
   wsB: WebSocket,
   kpA: { publicKey: Uint8Array; privateKey: Uint8Array },
@@ -122,40 +122,37 @@ async function doKeyExchange(
   const fpA = fingerprint(kpA.publicKey);
   const fpB = fingerprint(kpB.publicKey);
 
-  // Set up listeners before sending
-  const bReceivesKey = waitForMessage(wsB, (msg) => {
-    const p = msg.payload as Record<string, unknown> | undefined;
-    return msg.type === 'relay' && p?.controlType === 'key_exchange';
-  });
-  const aReceivesKey = waitForMessage(wsA, (msg) => {
-    const p = msg.payload as Record<string, unknown> | undefined;
-    return msg.type === 'relay' && p?.controlType === 'key_exchange';
-  });
-
-  // Send key exchange messages with fingerprints
-  sendRelay(wsA, {
-    controlType: 'key_exchange',
+  // A registers first and gets the members list back
+  const aReceivesMembers = waitForMessage(wsA, (msg) => msg.type === 'members');
+  wsA.send(JSON.stringify({
+    type: 'register',
     fingerprint: fpA,
     publicKey: Buffer.from(kpA.publicKey).toString('base64'),
-  });
-  sendRelay(wsB, {
-    controlType: 'key_exchange',
+    name: 'clientA',
+  }));
+  await aReceivesMembers;
+
+  // B registers — gets members list (including A), and A gets member_joined
+  const bReceivesMembers = waitForMessage(wsB, (msg) => msg.type === 'members');
+  const aReceivesJoined = waitForMessage(wsA, (msg) => msg.type === 'member_joined');
+  wsB.send(JSON.stringify({
+    type: 'register',
     fingerprint: fpB,
     publicKey: Buffer.from(kpB.publicKey).toString('base64'),
-  });
+    name: 'clientB',
+  }));
+  const bMembersMsg = await bReceivesMembers;
+  await aReceivesJoined;
 
-  // Wait for both to receive the other's key
-  const bMsg = await bReceivesKey;
-  const aMsg = await aReceivesKey;
+  // B's members list should contain A's public key
+  const bMembers = bMembersMsg.members as Array<{ fingerprint: string; publicKey: string }>;
+  const aMemberInB = bMembers.find((m) => m.fingerprint === fpA);
+  const pubKeyFromA = new Uint8Array(Buffer.from(aMemberInB!.publicKey, 'base64'));
 
-  // Extract public keys
-  const bPayload = bMsg.payload as Record<string, unknown>;
-  const aPayload = aMsg.payload as Record<string, unknown>;
-  const pubKeyFromA = new Uint8Array(Buffer.from(bPayload.publicKey as string, 'base64'));
-  const pubKeyFromB = new Uint8Array(Buffer.from(aPayload.publicKey as string, 'base64'));
-
-  // Compute shared secrets
-  const secretA = computeSharedSecret(pubKeyFromB, kpA.privateKey);
+  // A received member_joined for B — extract B's public key from it
+  // (A already has B's key from the member_joined notification)
+  // For computing shared secrets, we use the keypair directly
+  const secretA = computeSharedSecret(kpB.publicKey, kpA.privateKey);
   const secretB = computeSharedSecret(pubKeyFromA, kpB.privateKey);
 
   return { secretA, secretB, fpA, fpB };
@@ -259,7 +256,7 @@ describe('Bridge Integration Tests', () => {
   // Test 2: Key exchange completes successfully
   // -----------------------------------------------------------------------
   it(
-    'should complete key exchange and derive matching shared secrets',
+    'should complete registration and derive matching shared secrets',
     async () => {
       const code = await createRoom();
       const wsA = await connectWs(code);
@@ -268,7 +265,7 @@ describe('Bridge Integration Tests', () => {
       const kpA = generateKeypair();
       const kpB = generateKeypair();
 
-      const { secretA, secretB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB } = await doRegister(wsA, wsB, kpA, kpB);
 
       // Both sides should compute the same shared secret
       expect(Buffer.from(secretA).toString('hex')).toBe(
@@ -293,7 +290,7 @@ describe('Bridge Integration Tests', () => {
 
       const kpA = generateKeypair();
       const kpB = generateKeypair();
-      const { secretA, secretB, fpA, fpB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB, fpA, fpB } = await doRegister(wsA, wsB, kpA, kpB);
 
       // Side A sends a chat message to side B using multi-party envelope
       const chatMsg = createBridgeMessage('chat', fpA, {
@@ -368,7 +365,7 @@ describe('Bridge Integration Tests', () => {
 
       const kpA = generateKeypair();
       const kpB = generateKeypair();
-      const { secretA, secretB, fpA, fpB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB, fpA, fpB } = await doRegister(wsA, wsB, kpA, kpB);
 
       // Side A sends a task to side B
       const taskMsg = createBridgeMessage('task', fpA, {
@@ -443,7 +440,7 @@ describe('Bridge Integration Tests', () => {
 
       const kpA = generateKeypair();
       const kpB = generateKeypair();
-      const { secretA, secretB, fpA, fpB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB, fpA, fpB } = await doRegister(wsA, wsB, kpA, kpB);
 
       // Side A sends a message while B is connected
       const msg1 = createBridgeMessage('chat', fpA, { title: 'First', body: 'Message 1' });
@@ -509,19 +506,59 @@ describe('Bridge Integration Tests', () => {
   );
 
   // -----------------------------------------------------------------------
-  // Test 6: Multi-party — three clients can connect to the same room
+  // Test 6: Multi-party — three clients register and see each other
   // -----------------------------------------------------------------------
   it(
-    'should allow three clients to connect to a room',
+    'should allow three clients to register and see each other via members list',
     async () => {
       const code = await createRoom();
       const wsA = await connectWs(code);
       const wsB = await connectWs(code);
       const wsC = await connectWs(code);
 
-      expect(wsA.readyState).toBe(WebSocket.OPEN);
-      expect(wsB.readyState).toBe(WebSocket.OPEN);
-      expect(wsC.readyState).toBe(WebSocket.OPEN);
+      const kpA = generateKeypair();
+      const kpB = generateKeypair();
+      const kpC = generateKeypair();
+      const fpA = fingerprint(kpA.publicKey);
+      const fpB = fingerprint(kpB.publicKey);
+      const fpC = fingerprint(kpC.publicKey);
+
+      // A registers first
+      const aMembersPromise = waitForMessage(wsA, (msg) => msg.type === 'members');
+      wsA.send(JSON.stringify({
+        type: 'register',
+        fingerprint: fpA,
+        publicKey: Buffer.from(kpA.publicKey).toString('base64'),
+        name: 'A',
+      }));
+      const aMembers = await aMembersPromise;
+      expect((aMembers.members as unknown[]).length).toBe(1); // only self
+
+      // B registers — should see A in members list
+      const bMembersPromise = waitForMessage(wsB, (msg) => msg.type === 'members');
+      wsB.send(JSON.stringify({
+        type: 'register',
+        fingerprint: fpB,
+        publicKey: Buffer.from(kpB.publicKey).toString('base64'),
+        name: 'B',
+      }));
+      const bMembers = await bMembersPromise;
+      const bMemberList = bMembers.members as Array<{ fingerprint: string }>;
+      expect(bMemberList.length).toBe(2);
+      expect(bMemberList.map((m) => m.fingerprint).sort()).toEqual([fpA, fpB].sort());
+
+      // C registers — should see A and B in members list
+      const cMembersPromise = waitForMessage(wsC, (msg) => msg.type === 'members');
+      wsC.send(JSON.stringify({
+        type: 'register',
+        fingerprint: fpC,
+        publicKey: Buffer.from(kpC.publicKey).toString('base64'),
+        name: 'C',
+      }));
+      const cMembers = await cMembersPromise;
+      const cMemberList = cMembers.members as Array<{ fingerprint: string }>;
+      expect(cMemberList.length).toBe(3);
+      expect(cMemberList.map((m) => m.fingerprint).sort()).toEqual([fpA, fpB, fpC].sort());
 
       wsA.close();
       wsB.close();

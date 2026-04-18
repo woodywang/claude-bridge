@@ -56,6 +56,15 @@ export default {
       });
     }
 
+    // GET /room/:code/members — return member list from DO
+    const membersMatch = path.match(/^\/room\/([A-Z0-9]{6})\/members$/);
+    if (membersMatch && request.method === 'GET') {
+      const code = membersMatch[1];
+      const id = env.ROOM.idFromName(code);
+      const stub = env.ROOM.get(id);
+      return stub.fetch(new Request(new URL('/members', request.url).toString()));
+    }
+
     // WebSocket upgrade to room
     const wsMatch = path.match(/^\/room\/([A-Z0-9]{6})\/ws$/);
     if (wsMatch) {

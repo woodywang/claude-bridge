@@ -106,7 +106,7 @@ async function main(): Promise<void> {
       handleRelayMessage(data, state);
     },
     () => {
-      sendKeyExchange(state);
+      sendRegister(state);
     },
   );
   state.ws = ws;
@@ -176,16 +176,25 @@ function handleRelayMessage(data: unknown, state: BridgeState): void {
   }
   const msg = data as Record<string, unknown>;
 
-  const payload = msg.payload as Record<string, unknown> | undefined;
-  if (!payload) {
-    // Could be a system message from the DO (e.g., room_status)
-    console.error(`[bridge] Non-payload message: ${JSON.stringify(msg)}`);
+  // DO control messages (no payload wrapper)
+  if (msg.type === 'members') {
+    handleMembers(msg, state);
+    return;
+  }
+  if (msg.type === 'member_joined') {
+    handleMemberJoined(msg, state);
+    return;
+  }
+  if (msg.type === 'member_left') {
+    console.error(`[bridge] Peer left: ${msg.fingerprint}`);
+    // Don't remove from peers — they might reconnect, and we still need their key for offline messages
     return;
   }
 
-  // Key exchange (control plane)
-  if (payload.controlType === 'key_exchange') {
-    handleKeyExchange(payload, state);
+  // Relay messages (with payload wrapper)
+  const payload = msg.payload as Record<string, unknown> | undefined;
+  if (!payload) {
+    console.error(`[bridge] Non-payload message: ${JSON.stringify(msg)}`);
     return;
   }
 
@@ -198,43 +207,46 @@ function handleRelayMessage(data: unknown, state: BridgeState): void {
   console.error(`[bridge] Unknown payload type: ${JSON.stringify(payload)}`);
 }
 
-function handleKeyExchange(
-  payload: Record<string, unknown>,
-  state: BridgeState,
-): void {
-  const peerPubKeyB64 = payload.publicKey as string | undefined;
-  const peerFp = payload.fingerprint as string | undefined;
+function handleMembers(data: Record<string, unknown>, state: BridgeState): void {
+  const members = data.members as Array<{ fingerprint: string; publicKey: string; name?: string; online: boolean }>;
+  if (!Array.isArray(members)) return;
 
-  if (!peerPubKeyB64 || !peerFp) {
-    console.error('[bridge] Key exchange message missing publicKey or fingerprint');
-    return;
+  for (const member of members) {
+    if (member.fingerprint === state.myFingerprint) continue; // skip self
+    if (state.peers.has(member.fingerprint)) continue; // already known
+
+    try {
+      const peerPublicKey = new Uint8Array(Buffer.from(member.publicKey, 'base64'));
+      const sharedSecret = computeSharedSecret(peerPublicKey, state.keypair.privateKey);
+      state.peers.set(member.fingerprint, {
+        fingerprint: member.fingerprint,
+        publicKey: peerPublicKey,
+        sharedSecret,
+      });
+      console.error(`[bridge] Added peer ${member.fingerprint} (${member.name ?? 'unknown'}, ${member.online ? 'online' : 'offline'})`);
+    } catch (err) {
+      console.error(`[bridge] Failed to add peer ${member.fingerprint}: ${(err as Error).message}`);
+    }
   }
+  console.error(`[bridge] ${state.peers.size} peers after member sync`);
+}
 
-  // Skip if it's our own key (reflected back by relay)
-  if (peerFp === state.myFingerprint) return;
-
-  // Skip if we already have this peer
-  if (state.peers.has(peerFp)) {
-    console.error(`[bridge] Already have peer ${peerFp}, ignoring duplicate key exchange`);
-    return;
-  }
+function handleMemberJoined(data: Record<string, unknown>, state: BridgeState): void {
+  const member = data.member as { fingerprint: string; publicKey: string; name?: string } | undefined;
+  if (!member || member.fingerprint === state.myFingerprint) return;
+  if (state.peers.has(member.fingerprint)) return;
 
   try {
-    const peerPublicKey = new Uint8Array(Buffer.from(peerPubKeyB64, 'base64'));
+    const peerPublicKey = new Uint8Array(Buffer.from(member.publicKey, 'base64'));
     const sharedSecret = computeSharedSecret(peerPublicKey, state.keypair.privateKey);
-
-    state.peers.set(peerFp, {
-      fingerprint: peerFp,
+    state.peers.set(member.fingerprint, {
+      fingerprint: member.fingerprint,
       publicKey: peerPublicKey,
       sharedSecret,
     });
-
-    console.error(`[bridge] Key exchange with peer ${peerFp} complete (${state.peers.size} peers total)`);
-
-    // Re-send our key so the new peer can also complete exchange
-    sendKeyExchange(state);
+    console.error(`[bridge] New peer joined: ${member.fingerprint} (${member.name ?? 'unknown'})`);
   } catch (err) {
-    console.error(`[bridge] Key exchange failed: ${(err as Error).message}`);
+    console.error(`[bridge] Failed to add new peer: ${(err as Error).message}`);
   }
 }
 
@@ -438,26 +450,23 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
 }
 
 // ---------------------------------------------------------------------------
-// Key exchange helper
+// Register helper
 // ---------------------------------------------------------------------------
 
-function sendKeyExchange(state: BridgeState): void {
+function sendRegister(state: BridgeState): void {
   if (!state.ws.connected) {
-    console.error('[bridge] Cannot send key exchange — WebSocket not connected');
+    console.error('[bridge] Cannot register — WebSocket not connected');
     return;
   }
 
   const pubKeyB64 = Buffer.from(state.keypair.publicKey).toString('base64');
-  const envelope = JSON.stringify({
-    type: 'relay',
-    payload: {
-      controlType: 'key_exchange',
-      fingerprint: state.myFingerprint,
-      publicKey: pubKeyB64,
-    },
-  });
-  state.ws.send(envelope);
-  console.error(`[bridge] Sent key exchange (fingerprint: ${state.myFingerprint})`);
+  state.ws.send(JSON.stringify({
+    type: 'register',
+    fingerprint: state.myFingerprint,
+    publicKey: pubKeyB64,
+    name: state.role, // use role as display name for now
+  }));
+  console.error(`[bridge] Registered with room (fingerprint: ${state.myFingerprint})`);
 }
 
 // ---------------------------------------------------------------------------
