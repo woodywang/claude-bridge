@@ -17,6 +17,7 @@ import type { BridgeWebSocket } from './websocket.js';
 
 export interface LocalTask {
   id: string;
+  seqId?: number;
   description: string;
   context: string;
   priority: 'low' | 'normal' | 'high';
@@ -29,6 +30,7 @@ export interface LocalTask {
 
 export interface InboxMessage {
   id: string;
+  seqId?: number;
   title: string;
   body: string;
   from: string;
@@ -54,7 +56,7 @@ export interface BridgeState {
   peers: Map<string, PeerInfo>; // keyed by fingerprint
   inbox: Map<string, InboxMessage>;
   tasks: Map<string, LocalTask>;
-  context: Map<string, { value: string; timestamp: number }>;
+  context: Map<string, { value: string; timestamp: number; seqId?: number }>;
   syncCounts: () => void;
 }
 
@@ -315,7 +317,10 @@ export function registerTools(server: McpServer, state: BridgeState): void {
     'List all messages in the inbox (newest first). Shows read/unread status, short ID, sender, title, and relative time.',
     {},
     async () => {
-      const messages = [...state.inbox.values()].sort((a, b) => b.timestamp - a.timestamp);
+      const messages = [...state.inbox.values()].sort((a, b) => {
+        if (a.seqId !== undefined && b.seqId !== undefined) return b.seqId - a.seqId;
+        return b.timestamp - a.timestamp;
+      });
       const unread = messages.filter((m) => !m.read).length;
 
       if (messages.length === 0) {

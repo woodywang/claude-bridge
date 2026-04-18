@@ -176,12 +176,25 @@ function syncCounts(state: BridgeState): void {
 // Relay message handler
 // ---------------------------------------------------------------------------
 
+let lastProcessedSeqId = 0;
+
 function handleRelayMessage(data: unknown, state: BridgeState): void {
   if (!data || typeof data !== 'object') {
     console.error('[bridge] Received non-object relay message');
     return;
   }
   const msg = data as Record<string, unknown>;
+  const seqId = typeof msg.seqId === 'number' ? msg.seqId : undefined;
+
+  // Gap detection
+  if (seqId !== undefined) {
+    if (lastProcessedSeqId > 0 && seqId > lastProcessedSeqId + 1) {
+      console.error(`[bridge] WARNING: message gap detected — expected seqId ${lastProcessedSeqId + 1}, got ${seqId}. ${seqId - lastProcessedSeqId - 1} message(s) may be lost.`);
+    }
+    if (seqId > lastProcessedSeqId) {
+      lastProcessedSeqId = seqId;
+    }
+  }
 
   // DO control messages (no payload wrapper)
   if (msg.type === 'members') {
@@ -207,7 +220,7 @@ function handleRelayMessage(data: unknown, state: BridgeState): void {
 
   // Encrypted data (data plane)
   if (payload.dataType === 'encrypted') {
-    handleEncryptedMessage(payload, state);
+    handleEncryptedMessage(payload, state, seqId);
     return;
   }
 
@@ -262,6 +275,7 @@ function handleMemberJoined(data: Record<string, unknown>, state: BridgeState): 
 function handleEncryptedMessage(
   payload: Record<string, unknown>,
   state: BridgeState,
+  seqId?: number,
 ): void {
   const fromFp = payload.from as string | undefined;
   const recipients = payload.recipients as Record<string, string> | undefined;
@@ -301,7 +315,7 @@ function handleEncryptedMessage(
         const decrypted = decrypt(encrypted, peer.sharedSecret);
         // If we get here without throwing, this is the right key
         const message: BridgeMessage = deserializeMessage(decrypted);
-        handleDecryptedMessage(message, state);
+        handleDecryptedMessage(message, state, seqId);
         return;
       } catch {
         continue;
@@ -315,13 +329,13 @@ function handleEncryptedMessage(
     const encrypted = new Uint8Array(Buffer.from(blob, 'base64'));
     const decrypted = decrypt(encrypted, sharedSecret);
     const message: BridgeMessage = deserializeMessage(decrypted);
-    handleDecryptedMessage(message, state);
+    handleDecryptedMessage(message, state, seqId);
   } catch (err) {
     console.error(`[bridge] Failed to decrypt/deserialize: ${(err as Error).message}`);
   }
 }
 
-function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): void {
+function handleDecryptedMessage(message: BridgeMessage, state: BridgeState, seqId?: number): void {
   const senderName = state.peers.get(message.from)?.name;
 
   switch (message.type) {
@@ -330,6 +344,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
       const now = Date.now();
       const localTask: LocalTask = {
         id: message.id,
+        seqId,
         description: taskPayload.description,
         context: taskPayload.context,
         priority: taskPayload.priority,
@@ -343,6 +358,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
       // Write to inbox file for hook pickup
       const inboxEntry: InboxEntry = {
         id: message.id,
+        seqId,
         type: 'task',
         from: message.from,
         fromName: senderName,
@@ -378,6 +394,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
       // Also write to inbox for hook notification
       const resultInboxEntry: InboxEntry = {
         id: message.id,
+        seqId,
         type: 'result',
         from: message.from,
         fromName: senderName,
@@ -392,16 +409,16 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
       const ctxPayload = message.payload as ContextPayload;
       const existingEntry = state.context.get(ctxPayload.key);
 
-      // Last-write-wins by timestamp
-      if (
-        !existingEntry ||
-        message.timestamp >= existingEntry.timestamp
-      ) {
+      // Last-write-wins by server-assigned seqId (falls back to timestamp for legacy messages)
+      const existingSeq = existingEntry?.seqId ?? 0;
+      const incomingSeq = seqId ?? 0;
+      if (!existingEntry || incomingSeq >= existingSeq) {
         switch (ctxPayload.operation) {
           case 'set':
             state.context.set(ctxPayload.key, {
               value: ctxPayload.value,
               timestamp: message.timestamp,
+              seqId,
             });
             break;
           case 'append': {
@@ -409,6 +426,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
             state.context.set(ctxPayload.key, {
               value: prev + ctxPayload.value,
               timestamp: message.timestamp,
+              seqId,
             });
             break;
           }
@@ -431,6 +449,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
       // Create InboxMessage and store in map
       const inboxMsg: InboxMessage = {
         id: message.id,
+        seqId,
         title: chatPayload.title,
         body: chatPayload.body,
         from: message.from,
@@ -443,6 +462,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
       // Write to inbox file for hook pickup
       const chatInboxEntry: InboxEntry = {
         id: message.id,
+        seqId,
         type: message.type,
         from: message.from,
         fromName: senderName,

@@ -11,6 +11,7 @@ const INBOX_FILE = join(INBOX_DIR, 'inbox.json');
 
 export interface InboxEntry {
   id: string;
+  seqId?: number;
   type: string;
   from: string;
   fromName?: string;

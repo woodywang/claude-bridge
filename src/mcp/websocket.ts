@@ -10,7 +10,7 @@ export class BridgeWebSocket {
   private reconnectDelay = MIN_RECONNECT_DELAY;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = true;
-  private _lastSeenSeqId: string | null = null;
+  private _lastSeenSeqId: number | null = null;
   private onOpen?: () => void;
 
   constructor(
@@ -38,7 +38,7 @@ export class BridgeWebSocket {
         this.reconnectDelay = MIN_RECONNECT_DELAY;
 
         // If reconnecting and we have a last seen seqId, send sync
-        if (this._lastSeenSeqId) {
+        if (this._lastSeenSeqId !== null) {
           const syncMsg = JSON.stringify({
             type: 'sync',
             lastSeenId: this._lastSeenSeqId,
@@ -67,7 +67,8 @@ export class BridgeWebSocket {
         }
         // Track seqId from relay messages
         if (parsed && typeof parsed === 'object' && 'seqId' in parsed) {
-          this._lastSeenSeqId = String((parsed as Record<string, unknown>).seqId);
+          const raw = (parsed as Record<string, unknown>).seqId;
+          this._lastSeenSeqId = typeof raw === 'number' ? raw : Number(raw);
         }
         this.onMessage(parsed);
       });
@@ -150,7 +151,7 @@ export class BridgeWebSocket {
     return this.ws !== null && this.ws.readyState === WebSocket.OPEN;
   }
 
-  get lastSeenSeqId(): string | null {
+  get lastSeenSeqId(): number | null {
     return this._lastSeenSeqId;
   }
 }
