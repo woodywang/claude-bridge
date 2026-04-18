@@ -198,9 +198,14 @@ export class BridgeRoom extends DurableObject<Env> {
   private async handleRelay(ws: WebSocket, parsed: Record<string, unknown>): Promise<void> {
     const fullMessage = JSON.stringify(parsed);
 
+    // Increment monotonic counter
+    const prev = (await this.ctx.storage.get<number>('seqCounter')) ?? 0;
+    const seqId = prev + 1;
+    await this.ctx.storage.put('seqCounter', seqId);
+
     // Store in message log for sync replay
     const entry: MessageLogEntry = {
-      id: generateId(),
+      id: String(seqId),
       data: fullMessage,
       timestamp: Date.now(),
     };
@@ -215,8 +220,8 @@ export class BridgeRoom extends DurableObject<Env> {
 
     await this.ctx.storage.put('messageLog', messageLog);
 
-    // Broadcast to all other connected WebSockets with seqId so clients can track
-    const envelope = JSON.stringify({ ...parsed, seqId: entry.id });
+    // Broadcast to all other connected WebSockets with seqId
+    const envelope = JSON.stringify({ ...parsed, seqId });
     const sockets = this.ctx.getWebSockets();
     for (const socket of sockets) {
       if (socket !== ws) {
@@ -231,15 +236,16 @@ export class BridgeRoom extends DurableObject<Env> {
 
   private async handleSync(ws: WebSocket, parsed: Record<string, unknown>): Promise<void> {
     const lastSeenId = parsed.lastSeenId;
-    if (typeof lastSeenId !== 'string') {
+    if (lastSeenId === undefined || lastSeenId === null) {
       ws.send(JSON.stringify({ type: 'error', message: 'Missing lastSeenId' }));
       return;
     }
+    const lastSeenStr = String(lastSeenId);
 
     const messageLog = (await this.ctx.storage.get<MessageLogEntry[]>('messageLog')) ?? [];
 
     // Find the index of the last seen message
-    const index = messageLog.findIndex((entry) => entry.id === lastSeenId);
+    const index = messageLog.findIndex((entry) => entry.id === lastSeenStr);
 
     // If not found, send all messages; otherwise send everything after the found index
     const toReplay = index === -1 ? messageLog : messageLog.slice(index + 1);
@@ -247,27 +253,12 @@ export class BridgeRoom extends DurableObject<Env> {
     for (const entry of toReplay) {
       try {
         const replayData = JSON.parse(entry.data);
-        replayData.seqId = entry.id;
+        replayData.seqId = Number(entry.id);
         ws.send(JSON.stringify(replayData));
       } catch {
-        // Socket may have closed or data may be corrupt
         break;
       }
     }
   }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Generate a random ID using crypto.getRandomValues (available in CF Workers).
- */
-function generateId(): string {
-  const bytes = new Uint8Array(16);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
