@@ -182,7 +182,7 @@ bin/
 - Each recipient gets a separately encrypted copy (no shared group key)
 - Targeted replies: only the intended recipient(s) can decrypt
 - DO is zero-knowledge: stores only encrypted blobs + public keys
-- Persistent identity: keypair saved to `~/.claude-bridge/identity.json` (mode 0600), stable across restarts
+- Persistent identity: keypair saved to `~/.claude-bridge/identity-<name>.json` (mode 0600), stable across restarts
 - Identity: BLAKE2b fingerprint of public key (8 hex chars) + user-configured alias
 - Server-assigned monotonic seqId for message ordering (no client clock dependency)
 - Max message size: 256KB before encryption

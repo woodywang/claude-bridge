@@ -82,7 +82,7 @@ async function main(): Promise<void> {
   // -----------------------------------------------------------------------
   // 4. Load or generate keypair
   // -----------------------------------------------------------------------
-  const identityPath = join(homedir(), '.claude-bridge', 'identity.json');
+  const identityPath = join(homedir(), '.claude-bridge', `identity-${myName}.json`);
   let keypair = loadKeypair(identityPath);
   if (keypair) {
     console.error(`[bridge] Loaded existing keypair from ${identityPath}`);

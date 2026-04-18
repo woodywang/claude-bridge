@@ -19,7 +19,7 @@ Claude A ←stdio→ MCP Server ←WSS→ CF Durable Object (relay) ←WSS→ MC
 - **Pairwise encryption**: each message encrypted separately per recipient (X25519 DH + XSalsa20-Poly1305). Wire format: `{from: fingerprint, recipients: {fp: blob, ...}}`.
 - **Targeted sending**: `encryptAndSend(msg, state, targets?)` sends to specific peers when targets provided, broadcasts otherwise.
 - **Server-side ordering**: DO assigns a monotonic `seqId` to each relayed message. Clients use seqId for inbox sorting, context conflict resolution (last-write-wins), gap detection, and dedup. Client timestamps are for display only.
-- **Persistent identity**: Keypair saved to `~/.claude-bridge/identity.json`. Fingerprint survives process restarts.
+- **Persistent identity**: Keypair saved to `~/.claude-bridge/identity-<name>.json` (per alias). Fingerprint survives process restarts. Multiple instances on the same machine get distinct identities.
 - **Two tsconfigs**: `tsconfig.json` for Node code (NodeNext), `tsconfig.worker.json` for CF Worker (bundler).
 
 ## Identity & Alias
