@@ -5,6 +5,7 @@ import {
   computeSharedSecret,
   encrypt,
   decrypt,
+  fingerprint,
   MAX_MESSAGE_SIZE,
 } from './crypto.js';
 
@@ -141,5 +142,28 @@ describe('crypto', () => {
     // But both should decrypt to the same plaintext
     expect(decrypt(encrypted1, shared)).toEqual(plaintext);
     expect(decrypt(encrypted2, shared)).toEqual(plaintext);
+  });
+});
+
+describe('fingerprint', () => {
+  it('returns an 8-character hex string', () => {
+    const kp = generateKeypair();
+    const fp = fingerprint(kp.publicKey);
+    expect(fp).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  it('returns the same fingerprint for the same key', () => {
+    const kp = generateKeypair();
+    const fp1 = fingerprint(kp.publicKey);
+    const fp2 = fingerprint(kp.publicKey);
+    expect(fp1).toBe(fp2);
+  });
+
+  it('returns different fingerprints for different keys', () => {
+    const kp1 = generateKeypair();
+    const kp2 = generateKeypair();
+    const fp1 = fingerprint(kp1.publicKey);
+    const fp2 = fingerprint(kp2.publicKey);
+    expect(fp1).not.toBe(fp2);
   });
 });

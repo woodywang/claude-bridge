@@ -36,14 +36,6 @@ export class BridgeRoom extends DurableObject<Env> {
       return new Response('Expected WebSocket upgrade', { status: 426 });
     }
 
-    const existing = this.ctx.getWebSockets();
-    if (existing.length >= 2) {
-      return new Response(JSON.stringify({ error: 'Room is full (max 2 peers)' }), {
-        status: 409,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
 

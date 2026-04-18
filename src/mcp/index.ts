@@ -5,6 +5,7 @@ import {
   generateKeypair,
   computeSharedSecret,
   decrypt,
+  fingerprint,
 } from '../shared/crypto.js';
 import {
   deserializeMessage,
@@ -72,7 +73,8 @@ async function main(): Promise<void> {
   // 4. Generate keypair
   // -----------------------------------------------------------------------
   const keypair = generateKeypair();
-  console.error('[bridge] Keypair generated');
+  const myFingerprint = fingerprint(keypair.publicKey);
+  console.error(`[bridge] Keypair generated (fingerprint: ${myFingerprint})`);
 
   // -----------------------------------------------------------------------
   // 5. Build shared state
@@ -82,7 +84,8 @@ async function main(): Promise<void> {
     roomCode,
     ws: null!, // set below after creating WebSocket
     keypair,
-    sharedSecret: null,
+    myFingerprint,
+    peers: new Map(),
     inbox: new Map(),
     tasks: new Map(),
     context: new Map(),
@@ -199,35 +202,39 @@ function handleKeyExchange(
   payload: Record<string, unknown>,
   state: BridgeState,
 ): void {
-  if (state.sharedSecret) {
-    console.error('[bridge] Key exchange already done, ignoring duplicate');
+  const peerPubKeyB64 = payload.publicKey as string | undefined;
+  const peerFp = payload.fingerprint as string | undefined;
+
+  if (!peerPubKeyB64 || !peerFp) {
+    console.error('[bridge] Key exchange message missing publicKey or fingerprint');
     return;
   }
 
-  const peerPubKeyB64 = payload.publicKey as string | undefined;
-  if (!peerPubKeyB64) {
-    console.error('[bridge] Key exchange message missing publicKey');
+  // Skip if it's our own key (reflected back by relay)
+  if (peerFp === state.myFingerprint) return;
+
+  // Skip if we already have this peer
+  if (state.peers.has(peerFp)) {
+    console.error(`[bridge] Already have peer ${peerFp}, ignoring duplicate key exchange`);
     return;
   }
 
   try {
-    const peerPublicKey = new Uint8Array(
-      Buffer.from(peerPubKeyB64, 'base64'),
-    );
+    const peerPublicKey = new Uint8Array(Buffer.from(peerPubKeyB64, 'base64'));
+    const sharedSecret = computeSharedSecret(peerPublicKey, state.keypair.privateKey);
 
-    state.sharedSecret = computeSharedSecret(
-      peerPublicKey,
-      state.keypair.privateKey,
-    );
-    console.error('[bridge] Shared secret computed — key exchange done!');
+    state.peers.set(peerFp, {
+      fingerprint: peerFp,
+      publicKey: peerPublicKey,
+      sharedSecret,
+    });
 
-    // Re-send our public key so the peer can also complete key exchange
-    // (handles timing: if peer connected first and sent their key before we did)
+    console.error(`[bridge] Key exchange with peer ${peerFp} complete (${state.peers.size} peers total)`);
+
+    // Re-send our key so the new peer can also complete exchange
     sendKeyExchange(state);
   } catch (err) {
-    console.error(
-      `[bridge] Key exchange failed: ${(err as Error).message}`,
-    );
+    console.error(`[bridge] Key exchange failed: ${(err as Error).message}`);
   }
 }
 
@@ -235,164 +242,199 @@ function handleEncryptedMessage(
   payload: Record<string, unknown>,
   state: BridgeState,
 ): void {
-  if (!state.sharedSecret) {
-    console.error(
-      '[bridge] Received encrypted message but no shared secret yet — dropping',
-    );
-    return;
+  const fromFp = payload.from as string | undefined;
+  const recipients = payload.recipients as Record<string, string> | undefined;
+
+  // Support both new multi-party format and legacy single-blob format
+  let blob: string | undefined;
+  let senderFp: string | undefined;
+
+  if (recipients && fromFp) {
+    // New format: find our copy
+    blob = recipients[state.myFingerprint];
+    senderFp = fromFp;
+    if (!blob) {
+      // Message not addressed to us
+      return;
+    }
+  } else {
+    // Legacy format (single blob) - try all peers
+    blob = payload.blob as string | undefined;
+    senderFp = fromFp;
   }
 
-  const blob = payload.blob as string | undefined;
   if (!blob) {
     console.error('[bridge] Encrypted message missing blob');
     return;
   }
 
-  try {
-    const encrypted = new Uint8Array(Buffer.from(blob, 'base64'));
-    const decrypted = decrypt(encrypted, state.sharedSecret);
-    const message: BridgeMessage = deserializeMessage(decrypted);
-
-    // Handle by type
-    switch (message.type) {
-      case 'task': {
-        const taskPayload = message.payload as TaskPayload;
-        const now = Date.now();
-        const localTask: LocalTask = {
-          id: message.id,
-          description: taskPayload.description,
-          context: taskPayload.context,
-          priority: taskPayload.priority,
-          status: 'pending',
-          createdAt: now,
-          updatedAt: now,
-          direction: 'received',
-        };
-        state.tasks.set(message.id, localTask);
-
-        // Write to inbox file for hook pickup
-        const inboxEntry: InboxEntry = {
-          id: message.id,
-          type: 'task',
-          from: message.from,
-          timestamp: message.timestamp,
-          summary: `[${taskPayload.priority}] ${taskPayload.description}`,
-        };
-        writeToInbox(inboxEntry);
-
-        console.error(
-          `[bridge] Received task: id=${message.id}, priority=${taskPayload.priority}`,
-        );
-        break;
-      }
-
-      case 'result': {
-        const resultPayload = message.payload as ResultPayload;
-        const task = state.tasks.get(resultPayload.taskId);
-        if (task) {
-          task.status = resultPayload.status;
-          if (resultPayload.summary) {
-            task.result = resultPayload.summary;
-          }
-          task.updatedAt = Date.now();
-          console.error(
-            `[bridge] Task ${resultPayload.taskId} updated to status=${resultPayload.status}`,
-          );
-        } else {
-          console.error(
-            `[bridge] Received result for unknown task: ${resultPayload.taskId}`,
-          );
-        }
-
-        // Also write to inbox for hook notification
-        const resultInboxEntry: InboxEntry = {
-          id: message.id,
-          type: 'result',
-          from: message.from,
-          timestamp: message.timestamp,
-          summary: `Task ${resultPayload.taskId} -> ${resultPayload.status}${resultPayload.summary ? ': ' + resultPayload.summary : ''}`,
-        };
-        writeToInbox(resultInboxEntry);
-        break;
-      }
-
-      case 'context': {
-        const ctxPayload = message.payload as ContextPayload;
-        const existingEntry = state.context.get(ctxPayload.key);
-
-        // Last-write-wins by timestamp
-        if (
-          !existingEntry ||
-          message.timestamp >= existingEntry.timestamp
-        ) {
-          switch (ctxPayload.operation) {
-            case 'set':
-              state.context.set(ctxPayload.key, {
-                value: ctxPayload.value,
-                timestamp: message.timestamp,
-              });
-              break;
-            case 'append': {
-              const prev = existingEntry?.value ?? '';
-              state.context.set(ctxPayload.key, {
-                value: prev + ctxPayload.value,
-                timestamp: message.timestamp,
-              });
-              break;
-            }
-            case 'delete':
-              state.context.delete(ctxPayload.key);
-              break;
-          }
-        }
-
-        console.error(
-          `[bridge] Context ${ctxPayload.operation}: key=${ctxPayload.key}`,
-        );
-        break;
-      }
-
-      case 'chat':
-      default: {
-        const chatPayload = message.payload as ChatPayload;
-
-        // Create InboxMessage and store in map
-        const inboxMsg: InboxMessage = {
-          id: message.id,
-          title: chatPayload.title,
-          body: chatPayload.body,
-          from: message.from,
-          timestamp: message.timestamp,
-          read: false,
-          replyTo: chatPayload.replyTo,
-        };
-        state.inbox.set(message.id, inboxMsg);
-
-        // Write to inbox file for hook pickup
-        const chatInboxEntry: InboxEntry = {
-          id: message.id,
-          type: message.type,
-          from: message.from,
-          timestamp: message.timestamp,
-          summary:
-            message.type === 'chat'
-              ? chatPayload.title
-              : JSON.stringify(message.payload),
-        };
-        writeToInbox(chatInboxEntry);
-        break;
+  // Find the peer's shared secret for decryption
+  let sharedSecret: Uint8Array | undefined;
+  if (senderFp && state.peers.has(senderFp)) {
+    sharedSecret = state.peers.get(senderFp)!.sharedSecret;
+  } else {
+    // Try each peer's secret (fallback for legacy messages without from field)
+    for (const peer of state.peers.values()) {
+      try {
+        const encrypted = new Uint8Array(Buffer.from(blob, 'base64'));
+        const decrypted = decrypt(encrypted, peer.sharedSecret);
+        // If we get here without throwing, this is the right key
+        const message: BridgeMessage = deserializeMessage(decrypted);
+        handleDecryptedMessage(message, state);
+        return;
+      } catch {
+        continue;
       }
     }
-
-    syncCounts(state);
-    console.error(
-      `[bridge] Received message: type=${message.type}, id=${message.id}`,
-    );
-  } catch (err) {
-    console.error(
-      `[bridge] Failed to decrypt/deserialize message: ${(err as Error).message}`,
-    );
+    console.error('[bridge] Could not decrypt message with any known peer key');
+    return;
   }
+
+  try {
+    const encrypted = new Uint8Array(Buffer.from(blob, 'base64'));
+    const decrypted = decrypt(encrypted, sharedSecret);
+    const message: BridgeMessage = deserializeMessage(decrypted);
+    handleDecryptedMessage(message, state);
+  } catch (err) {
+    console.error(`[bridge] Failed to decrypt/deserialize: ${(err as Error).message}`);
+  }
+}
+
+function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): void {
+  switch (message.type) {
+    case 'task': {
+      const taskPayload = message.payload as TaskPayload;
+      const now = Date.now();
+      const localTask: LocalTask = {
+        id: message.id,
+        description: taskPayload.description,
+        context: taskPayload.context,
+        priority: taskPayload.priority,
+        status: 'pending',
+        createdAt: now,
+        updatedAt: now,
+        direction: 'received',
+      };
+      state.tasks.set(message.id, localTask);
+
+      // Write to inbox file for hook pickup
+      const inboxEntry: InboxEntry = {
+        id: message.id,
+        type: 'task',
+        from: message.from,
+        timestamp: message.timestamp,
+        summary: `[${taskPayload.priority}] ${taskPayload.description}`,
+      };
+      writeToInbox(inboxEntry);
+
+      console.error(
+        `[bridge] Received task: id=${message.id}, priority=${taskPayload.priority}`,
+      );
+      break;
+    }
+
+    case 'result': {
+      const resultPayload = message.payload as ResultPayload;
+      const task = state.tasks.get(resultPayload.taskId);
+      if (task) {
+        task.status = resultPayload.status;
+        if (resultPayload.summary) {
+          task.result = resultPayload.summary;
+        }
+        task.updatedAt = Date.now();
+        console.error(
+          `[bridge] Task ${resultPayload.taskId} updated to status=${resultPayload.status}`,
+        );
+      } else {
+        console.error(
+          `[bridge] Received result for unknown task: ${resultPayload.taskId}`,
+        );
+      }
+
+      // Also write to inbox for hook notification
+      const resultInboxEntry: InboxEntry = {
+        id: message.id,
+        type: 'result',
+        from: message.from,
+        timestamp: message.timestamp,
+        summary: `Task ${resultPayload.taskId} -> ${resultPayload.status}${resultPayload.summary ? ': ' + resultPayload.summary : ''}`,
+      };
+      writeToInbox(resultInboxEntry);
+      break;
+    }
+
+    case 'context': {
+      const ctxPayload = message.payload as ContextPayload;
+      const existingEntry = state.context.get(ctxPayload.key);
+
+      // Last-write-wins by timestamp
+      if (
+        !existingEntry ||
+        message.timestamp >= existingEntry.timestamp
+      ) {
+        switch (ctxPayload.operation) {
+          case 'set':
+            state.context.set(ctxPayload.key, {
+              value: ctxPayload.value,
+              timestamp: message.timestamp,
+            });
+            break;
+          case 'append': {
+            const prev = existingEntry?.value ?? '';
+            state.context.set(ctxPayload.key, {
+              value: prev + ctxPayload.value,
+              timestamp: message.timestamp,
+            });
+            break;
+          }
+          case 'delete':
+            state.context.delete(ctxPayload.key);
+            break;
+        }
+      }
+
+      console.error(
+        `[bridge] Context ${ctxPayload.operation}: key=${ctxPayload.key}`,
+      );
+      break;
+    }
+
+    case 'chat':
+    default: {
+      const chatPayload = message.payload as ChatPayload;
+
+      // Create InboxMessage and store in map
+      const inboxMsg: InboxMessage = {
+        id: message.id,
+        title: chatPayload.title,
+        body: chatPayload.body,
+        from: message.from,
+        timestamp: message.timestamp,
+        read: false,
+        replyTo: chatPayload.replyTo,
+      };
+      state.inbox.set(message.id, inboxMsg);
+
+      // Write to inbox file for hook pickup
+      const chatInboxEntry: InboxEntry = {
+        id: message.id,
+        type: message.type,
+        from: message.from,
+        timestamp: message.timestamp,
+        summary:
+          message.type === 'chat'
+            ? chatPayload.title
+            : JSON.stringify(message.payload),
+      };
+      writeToInbox(chatInboxEntry);
+      break;
+    }
+  }
+
+  syncCounts(state);
+  console.error(
+    `[bridge] Received message: type=${message.type}, id=${message.id}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -410,11 +452,12 @@ function sendKeyExchange(state: BridgeState): void {
     type: 'relay',
     payload: {
       controlType: 'key_exchange',
+      fingerprint: state.myFingerprint,
       publicKey: pubKeyB64,
     },
   });
   state.ws.send(envelope);
-  console.error('[bridge] Sent key exchange (public key)');
+  console.error(`[bridge] Sent key exchange (fingerprint: ${state.myFingerprint})`);
 }
 
 // ---------------------------------------------------------------------------

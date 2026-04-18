@@ -107,3 +107,15 @@ export function decrypt(
 
   return s.crypto_box_open_easy_afternm(ciphertext, nonce, sharedSecret);
 }
+
+/**
+ * Compute a short fingerprint of a public key (first 8 hex chars of BLAKE2b hash).
+ * Used as peer identity in the multi-party protocol.
+ */
+export function fingerprint(publicKey: Uint8Array): string {
+  // Use sodium's crypto_generichash (BLAKE2b) for fingerprinting
+  // Returns first 4 bytes (8 hex chars) as a short identifier
+  const s = getSodium();
+  const hash = s.crypto_generichash(32, publicKey);
+  return Buffer.from(hash.slice(0, 4)).toString('hex');
+}

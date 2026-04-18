@@ -7,6 +7,7 @@ import {
   computeSharedSecret,
   encrypt,
   decrypt,
+  fingerprint,
 } from '../shared/crypto.js';
 import {
   serializeMessage,
@@ -95,16 +96,21 @@ function sendRelay(ws: WebSocket, payload: unknown): void {
   ws.send(JSON.stringify({ type: 'relay', payload }));
 }
 
-function sendEncrypted(
+function sendEncryptedMultiParty(
   ws: WebSocket,
   msg: BridgeMessage,
   sharedSecret: Uint8Array,
+  fromFp: string,
+  toFp: string,
 ): void {
   const serialized = serializeMessage(msg);
   const encrypted = encrypt(serialized, sharedSecret);
-  // Base64-encode the encrypted bytes for JSON transport
   const b64 = Buffer.from(encrypted).toString('base64');
-  sendRelay(ws, b64);
+  sendRelay(ws, {
+    dataType: 'encrypted',
+    from: fromFp,
+    recipients: { [toFp]: b64 },
+  });
 }
 
 async function doKeyExchange(
@@ -112,7 +118,10 @@ async function doKeyExchange(
   wsB: WebSocket,
   kpA: { publicKey: Uint8Array; privateKey: Uint8Array },
   kpB: { publicKey: Uint8Array; privateKey: Uint8Array },
-): Promise<{ secretA: Uint8Array; secretB: Uint8Array }> {
+): Promise<{ secretA: Uint8Array; secretB: Uint8Array; fpA: string; fpB: string }> {
+  const fpA = fingerprint(kpA.publicKey);
+  const fpB = fingerprint(kpB.publicKey);
+
   // Set up listeners before sending
   const bReceivesKey = waitForMessage(wsB, (msg) => {
     const p = msg.payload as Record<string, unknown> | undefined;
@@ -123,13 +132,15 @@ async function doKeyExchange(
     return msg.type === 'relay' && p?.controlType === 'key_exchange';
   });
 
-  // Send key exchange messages
+  // Send key exchange messages with fingerprints
   sendRelay(wsA, {
     controlType: 'key_exchange',
+    fingerprint: fpA,
     publicKey: Buffer.from(kpA.publicKey).toString('base64'),
   });
   sendRelay(wsB, {
     controlType: 'key_exchange',
+    fingerprint: fpB,
     publicKey: Buffer.from(kpB.publicKey).toString('base64'),
   });
 
@@ -147,7 +158,7 @@ async function doKeyExchange(
   const secretA = computeSharedSecret(pubKeyFromB, kpA.privateKey);
   const secretB = computeSharedSecret(pubKeyFromA, kpB.privateKey);
 
-  return { secretA, secretB };
+  return { secretA, secretB, fpA, fpB };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -271,7 +282,7 @@ describe('Bridge Integration Tests', () => {
   );
 
   // -----------------------------------------------------------------------
-  // Test 3: Encrypted message send/receive round-trip
+  // Test 3: Encrypted message send/receive round-trip (multi-party format)
   // -----------------------------------------------------------------------
   it(
     'should encrypt, send, receive, and decrypt messages in both directions',
@@ -282,47 +293,56 @@ describe('Bridge Integration Tests', () => {
 
       const kpA = generateKeypair();
       const kpB = generateKeypair();
-      const { secretA, secretB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB, fpA, fpB } = await doKeyExchange(wsA, wsB, kpA, kpB);
 
-      // Side A sends a chat message to side B
-      const chatMsg = createBridgeMessage('chat', 'sideA', {
+      // Side A sends a chat message to side B using multi-party envelope
+      const chatMsg = createBridgeMessage('chat', fpA, {
         title: 'Greeting',
         body: 'Hello from A!',
       });
 
       const bReceives = waitForMessage(wsB, (msg) => msg.type === 'relay');
-      sendEncrypted(wsA, chatMsg, secretA);
+      sendEncryptedMultiParty(wsA, chatMsg, secretA, fpA, fpB);
 
       const received = await bReceives;
-      const encryptedPayload = received.payload as string;
-      const encryptedBytes = new Uint8Array(Buffer.from(encryptedPayload, 'base64'));
+      const recvPayload = received.payload as Record<string, unknown>;
+      expect(recvPayload.from).toBe(fpA);
+      expect(recvPayload.dataType).toBe('encrypted');
+      const recipients = recvPayload.recipients as Record<string, string>;
+      const blob = recipients[fpB];
+      expect(blob).toBeTruthy();
+
+      const encryptedBytes = new Uint8Array(Buffer.from(blob, 'base64'));
       const decrypted = decrypt(encryptedBytes, secretB);
       const decoded = deserializeMessage(decrypted);
 
       expect(decoded.type).toBe('chat');
-      expect(decoded.from).toBe('sideA');
+      expect(decoded.from).toBe(fpA);
       expect((decoded.payload as { title: string; body: string }).title).toBe('Greeting');
       expect((decoded.payload as { title: string; body: string }).body).toBe('Hello from A!');
 
       // Round-trip: side B sends back to side A
-      const replyMsg = createBridgeMessage('chat', 'sideB', {
+      const replyMsg = createBridgeMessage('chat', fpB, {
         title: 'Re: Greeting',
         body: 'Hello from B!',
         replyTo: chatMsg.id,
       });
 
       const aReceives = waitForMessage(wsA, (msg) => msg.type === 'relay');
-      sendEncrypted(wsB, replyMsg, secretB);
+      sendEncryptedMultiParty(wsB, replyMsg, secretB, fpB, fpA);
 
       const receivedReply = await aReceives;
-      const replyEncrypted = new Uint8Array(
-        Buffer.from(receivedReply.payload as string, 'base64'),
-      );
+      const replyPayload = receivedReply.payload as Record<string, unknown>;
+      const replyRecipients = replyPayload.recipients as Record<string, string>;
+      const replyBlob = replyRecipients[fpA];
+      expect(replyBlob).toBeTruthy();
+
+      const replyEncrypted = new Uint8Array(Buffer.from(replyBlob, 'base64'));
       const replyDecrypted = decrypt(replyEncrypted, secretA);
       const replyDecoded = deserializeMessage(replyDecrypted);
 
       expect(replyDecoded.type).toBe('chat');
-      expect(replyDecoded.from).toBe('sideB');
+      expect(replyDecoded.from).toBe(fpB);
       expect((replyDecoded.payload as { title: string; body: string; replyTo?: string }).body).toBe(
         'Hello from B!',
       );
@@ -337,7 +357,7 @@ describe('Bridge Integration Tests', () => {
   );
 
   // -----------------------------------------------------------------------
-  // Test 4: Task dispatch flow
+  // Test 4: Task dispatch flow (multi-party format)
   // -----------------------------------------------------------------------
   it(
     'should handle task dispatch and result acknowledgement',
@@ -348,22 +368,25 @@ describe('Bridge Integration Tests', () => {
 
       const kpA = generateKeypair();
       const kpB = generateKeypair();
-      const { secretA, secretB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB, fpA, fpB } = await doKeyExchange(wsA, wsB, kpA, kpB);
 
       // Side A sends a task to side B
-      const taskMsg = createBridgeMessage('task', 'sideA', {
+      const taskMsg = createBridgeMessage('task', fpA, {
         description: 'Refactor the widget module',
         context: 'The widget module has grown too large',
         priority: 'high' as const,
       });
 
       const bReceivesTask = waitForMessage(wsB, (msg) => msg.type === 'relay');
-      sendEncrypted(wsA, taskMsg, secretA);
+      sendEncryptedMultiParty(wsA, taskMsg, secretA, fpA, fpB);
 
       const received = await bReceivesTask;
+      const recvPayload = received.payload as Record<string, unknown>;
+      const recvRecipients = recvPayload.recipients as Record<string, string>;
+      const taskBlob = recvRecipients[fpB];
       const decrypted = deserializeMessage(
         decrypt(
-          new Uint8Array(Buffer.from(received.payload as string, 'base64')),
+          new Uint8Array(Buffer.from(taskBlob, 'base64')),
           secretB,
         ),
       );
@@ -374,19 +397,22 @@ describe('Bridge Integration Tests', () => {
       );
 
       // Side B sends ack result back to side A
-      const ackMsg = createBridgeMessage('result', 'sideB', {
+      const ackMsg = createBridgeMessage('result', fpB, {
         taskId: taskMsg.id,
         status: 'ack' as const,
         summary: 'Task received, starting work',
       });
 
       const aReceivesAck = waitForMessage(wsA, (msg) => msg.type === 'relay');
-      sendEncrypted(wsB, ackMsg, secretB);
+      sendEncryptedMultiParty(wsB, ackMsg, secretB, fpB, fpA);
 
       const ackReceived = await aReceivesAck;
+      const ackPayload = ackReceived.payload as Record<string, unknown>;
+      const ackRecipients = ackPayload.recipients as Record<string, string>;
+      const ackBlob = ackRecipients[fpA];
       const ackDecrypted = deserializeMessage(
         decrypt(
-          new Uint8Array(Buffer.from(ackReceived.payload as string, 'base64')),
+          new Uint8Array(Buffer.from(ackBlob, 'base64')),
           secretA,
         ),
       );
@@ -406,7 +432,7 @@ describe('Bridge Integration Tests', () => {
   );
 
   // -----------------------------------------------------------------------
-  // Test 5: Sync replay after reconnection
+  // Test 5: Sync replay after reconnection (multi-party format)
   // -----------------------------------------------------------------------
   it(
     'should replay missed messages after reconnection via sync',
@@ -417,12 +443,12 @@ describe('Bridge Integration Tests', () => {
 
       const kpA = generateKeypair();
       const kpB = generateKeypair();
-      const { secretA, secretB } = await doKeyExchange(wsA, wsB, kpA, kpB);
+      const { secretA, secretB, fpA, fpB } = await doKeyExchange(wsA, wsB, kpA, kpB);
 
       // Side A sends a message while B is connected
-      const msg1 = createBridgeMessage('chat', 'sideA', { title: 'First', body: 'Message 1' });
+      const msg1 = createBridgeMessage('chat', fpA, { title: 'First', body: 'Message 1' });
       const bReceivesMsg1 = waitForMessage(wsB, (msg) => msg.type === 'relay');
-      sendEncrypted(wsA, msg1, secretA);
+      sendEncryptedMultiParty(wsA, msg1, secretA, fpA, fpB);
 
       const received1 = await bReceivesMsg1;
       const lastSeenId = received1.seqId as string;
@@ -432,9 +458,16 @@ describe('Bridge Integration Tests', () => {
       wsB.close();
       await sleep(500); // Give time for close to propagate
 
-      // Side A sends another message while B is offline
-      const msg2 = createBridgeMessage('chat', 'sideA', { title: 'Second', body: 'Message 2 (while B offline)' });
-      sendRelay(wsA, Buffer.from(encrypt(serializeMessage(msg2), secretA)).toString('base64'));
+      // Side A sends another message while B is offline (multi-party format)
+      const msg2 = createBridgeMessage('chat', fpA, { title: 'Second', body: 'Message 2 (while B offline)' });
+      const serialized2 = serializeMessage(msg2);
+      const encrypted2 = encrypt(serialized2, secretA);
+      const b64_2 = Buffer.from(encrypted2).toString('base64');
+      sendRelay(wsA, {
+        dataType: 'encrypted',
+        from: fpA,
+        recipients: { [fpB]: b64_2 },
+      });
 
       await sleep(200); // Give time for the message to be stored
 
@@ -452,11 +485,14 @@ describe('Bridge Integration Tests', () => {
       const relayMessages = replayedMessages.filter((m) => m.type === 'relay');
       expect(relayMessages.length).toBeGreaterThanOrEqual(1);
 
-      // Decrypt and verify the missed message
+      // Decrypt and verify the missed message using multi-party format
       const missedRelay = relayMessages[relayMessages.length - 1];
+      const missedPayload = missedRelay.payload as Record<string, unknown>;
+      const missedRecipients = missedPayload.recipients as Record<string, string>;
+      const missedBlob = missedRecipients[fpB];
       const missedDecrypted = deserializeMessage(
         decrypt(
-          new Uint8Array(Buffer.from(missedRelay.payload as string, 'base64')),
+          new Uint8Array(Buffer.from(missedBlob, 'base64')),
           secretB,
         ),
       );
@@ -473,37 +509,23 @@ describe('Bridge Integration Tests', () => {
   );
 
   // -----------------------------------------------------------------------
-  // Test 6: 1:1 room enforcement
+  // Test 6: Multi-party — three clients can connect to the same room
   // -----------------------------------------------------------------------
   it(
-    'should reject a third client connecting to a room',
+    'should allow three clients to connect to a room',
     async () => {
       const code = await createRoom();
       const wsA = await connectWs(code);
       const wsB = await connectWs(code);
+      const wsC = await connectWs(code);
 
-      // Third client should be rejected with HTTP 409
-      // The ws library will get the upgrade failure
-      const result = await new Promise<{ error: boolean; statusCode?: number }>((resolve) => {
-        const ws3 = new WebSocket(`${WS_BASE}/room/${code}/ws`);
-        ws3.on('open', () => {
-          // Should not happen
-          ws3.close();
-          resolve({ error: false });
-        });
-        ws3.on('unexpected-response', (_req, res) => {
-          resolve({ error: true, statusCode: res.statusCode });
-        });
-        ws3.on('error', () => {
-          resolve({ error: true });
-        });
-      });
-
-      expect(result.error).toBe(true);
-      expect(result.statusCode).toBe(409);
+      expect(wsA.readyState).toBe(WebSocket.OPEN);
+      expect(wsB.readyState).toBe(WebSocket.OPEN);
+      expect(wsC.readyState).toBe(WebSocket.OPEN);
 
       wsA.close();
       wsB.close();
+      wsC.close();
     },
     TEST_TIMEOUT,
   );

@@ -37,12 +37,19 @@ export interface InboxMessage {
   replyTo?: string;
 }
 
+export interface PeerInfo {
+  fingerprint: string;
+  publicKey: Uint8Array;
+  sharedSecret: Uint8Array;
+}
+
 export interface BridgeState {
   role: 'host' | 'peer';
   roomCode: string;
   ws: BridgeWebSocket;
   keypair: Keypair;
-  sharedSecret: Uint8Array | null;
+  myFingerprint: string;       // own pubkey fingerprint
+  peers: Map<string, PeerInfo>; // keyed by fingerprint
   inbox: Map<string, InboxMessage>;
   tasks: Map<string, LocalTask>;
   context: Map<string, { value: string; timestamp: number }>;
@@ -62,8 +69,8 @@ function errorResult(text: string) {
 }
 
 function requireConnected(state: BridgeState): ReturnType<typeof errorResult> | null {
-  if (!state.sharedSecret) {
-    return errorResult('Key exchange not complete. Wait for the peer to connect.');
+  if (state.peers.size === 0) {
+    return errorResult('No peers connected. Wait for someone to join the room.');
   }
   if (!state.ws.connected) {
     return errorResult('WebSocket not connected. Check bridge status.');
@@ -77,26 +84,33 @@ function requireConnected(state: BridgeState): ReturnType<typeof errorResult> | 
 
 /**
  * Helper: encrypt a BridgeMessage and send via WebSocket relay.
- * Returns the serialized byte length and base64 blob length.
+ * Encrypts separately for each peer (pairwise encryption).
+ * Returns the serialized byte length and recipient count.
  */
 function encryptAndSend(
   msg: BridgeMessage,
   state: BridgeState,
-): { plaintextBytes: number; blobLength: number } {
+): { plaintextBytes: number; recipientCount: number } {
   const serialized = serializeMessage(msg);
-  const encrypted = encrypt(serialized, state.sharedSecret!);
-  const blob = Buffer.from(encrypted).toString('base64');
+
+  // Encrypt separately for each peer
+  const recipients: Record<string, string> = {};
+  for (const [fp, peer] of state.peers) {
+    const encrypted = encrypt(serialized, peer.sharedSecret);
+    recipients[fp] = Buffer.from(encrypted).toString('base64');
+  }
 
   const envelope = JSON.stringify({
     type: 'relay',
     payload: {
       dataType: 'encrypted',
-      blob,
+      from: state.myFingerprint,
+      recipients,
     },
   });
   state.ws.send(envelope);
 
-  return { plaintextBytes: serialized.byteLength, blobLength: blob.length };
+  return { plaintextBytes: serialized.byteLength, recipientCount: Object.keys(recipients).length };
 }
 
 // ---------------------------------------------------------------------------
@@ -120,7 +134,7 @@ async function updateTaskAndNotify(
   if (summary) task.result = summary;
   task.updatedAt = Date.now();
 
-  const msg = createBridgeMessage('result', state.role, {
+  const msg = createBridgeMessage('result', state.myFingerprint, {
     taskId,
     status,
     summary,
@@ -179,8 +193,10 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       return textResult(JSON.stringify({
         role: state.role,
         roomCode: state.roomCode,
+        myFingerprint: state.myFingerprint,
         wsConnected: state.ws.connected,
-        keyExchangeDone: state.sharedSecret !== null,
+        peers: [...state.peers.keys()],
+        peerCount: state.peers.size,
         inboxTotal: state.inbox.size,
         inboxUnread: unread,
       }, null, 2));
@@ -200,7 +216,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       if (err) return err;
 
       try {
-        const msg = createBridgeMessage('chat', state.role, {
+        const msg = createBridgeMessage('chat', state.myFingerprint, {
           title,
           body,
         } satisfies ChatPayload);
@@ -295,7 +311,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
           ? original.title
           : `Re: ${original.title}`;
 
-        const msg = createBridgeMessage('chat', state.role, {
+        const msg = createBridgeMessage('chat', state.myFingerprint, {
           title: reTitle,
           body,
           replyTo: original.id,
@@ -326,7 +342,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       if (err) return err;
 
       try {
-        const msg = createBridgeMessage('task', state.role, {
+        const msg = createBridgeMessage('task', state.myFingerprint, {
           description,
           context,
           priority,
@@ -443,7 +459,7 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         const timestamp = Date.now();
         state.context.set(key, { value, timestamp });
 
-        const msg = createBridgeMessage('context', state.role, {
+        const msg = createBridgeMessage('context', state.myFingerprint, {
           key,
           value,
           operation: 'set',
