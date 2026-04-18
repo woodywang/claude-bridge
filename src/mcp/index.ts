@@ -1,11 +1,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { join } from 'path';
+import { homedir } from 'os';
 import {
   initCrypto,
   generateKeypair,
   computeSharedSecret,
   decrypt,
   fingerprint,
+  loadKeypair,
+  saveKeypair,
 } from '../shared/crypto.js';
 import {
   deserializeMessage,
@@ -76,11 +80,19 @@ async function main(): Promise<void> {
   }
 
   // -----------------------------------------------------------------------
-  // 4. Generate keypair
+  // 4. Load or generate keypair
   // -----------------------------------------------------------------------
-  const keypair = generateKeypair();
+  const identityPath = join(homedir(), '.claude-bridge', 'identity.json');
+  let keypair = loadKeypair(identityPath);
+  if (keypair) {
+    console.error(`[bridge] Loaded existing keypair from ${identityPath}`);
+  } else {
+    keypair = generateKeypair();
+    saveKeypair(keypair, identityPath);
+    console.error(`[bridge] Generated new keypair, saved to ${identityPath}`);
+  }
   const myFingerprint = fingerprint(keypair.publicKey);
-  console.error(`[bridge] Keypair generated (fingerprint: ${myFingerprint})`);
+  console.error(`[bridge] Fingerprint: ${myFingerprint}`);
 
   // -----------------------------------------------------------------------
   // 5. Build shared state

@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import {
   initCrypto,
   generateKeypair,
@@ -6,6 +9,8 @@ import {
   encrypt,
   decrypt,
   fingerprint,
+  saveKeypair,
+  loadKeypair,
   MAX_MESSAGE_SIZE,
 } from './crypto.js';
 
@@ -142,6 +147,44 @@ describe('crypto', () => {
     // But both should decrypt to the same plaintext
     expect(decrypt(encrypted1, shared)).toEqual(plaintext);
     expect(decrypt(encrypted2, shared)).toEqual(plaintext);
+  });
+});
+
+describe('keypair persistence', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), 'bridge-test-'));
+  });
+
+  afterEach(() => {
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('saves and loads keypair, preserving fingerprint', async () => {
+    await initCrypto();
+    const kp = generateKeypair();
+    const fp = fingerprint(kp.publicKey);
+    const filePath = join(tempDir, 'identity.json');
+
+    saveKeypair(kp, filePath);
+    const loaded = loadKeypair(filePath);
+
+    expect(loaded).not.toBeNull();
+    expect(fingerprint(loaded!.publicKey)).toBe(fp);
+    expect(Buffer.from(loaded!.privateKey)).toEqual(Buffer.from(kp.privateKey));
+  });
+
+  it('returns null when file does not exist', () => {
+    const loaded = loadKeypair(join(tempDir, 'nonexistent.json'));
+    expect(loaded).toBeNull();
+  });
+
+  it('returns null when file is corrupt', () => {
+    const filePath = join(tempDir, 'identity.json');
+    writeFileSync(filePath, 'not-json');
+    const loaded = loadKeypair(filePath);
+    expect(loaded).toBeNull();
   });
 });
 

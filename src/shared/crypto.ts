@@ -1,4 +1,6 @@
 import { createRequire } from 'module';
+import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 
 const require = createRequire(import.meta.url);
 const _sodium = require('libsodium-wrappers') as typeof import('libsodium-wrappers');
@@ -118,4 +120,34 @@ export function fingerprint(publicKey: Uint8Array): string {
   const s = getSodium();
   const hash = s.crypto_generichash(32, publicKey);
   return Buffer.from(hash.slice(0, 4)).toString('hex');
+}
+
+/**
+ * Save a keypair to a JSON file (base64-encoded keys).
+ * Creates parent directories as needed. File is written with mode 0o600.
+ */
+export function saveKeypair(kp: Keypair, filePath: string): void {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const data = {
+    publicKey: Buffer.from(kp.publicKey).toString('base64'),
+    privateKey: Buffer.from(kp.privateKey).toString('base64'),
+  };
+  writeFileSync(filePath, JSON.stringify(data, null, 2), { mode: 0o600 });
+}
+
+/**
+ * Load a keypair from a JSON file written by saveKeypair.
+ * Returns null if the file does not exist or is corrupt.
+ */
+export function loadKeypair(filePath: string): Keypair | null {
+  try {
+    const raw = readFileSync(filePath, 'utf-8');
+    const data = JSON.parse(raw) as { publicKey: string; privateKey: string };
+    return {
+      publicKey: new Uint8Array(Buffer.from(data.publicKey, 'base64')),
+      privateKey: new Uint8Array(Buffer.from(data.privateKey, 'base64')),
+    };
+  } catch {
+    return null;
+  }
 }
