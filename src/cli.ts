@@ -153,9 +153,11 @@ program
         process.exit(1);
       }
 
-      // Resolve path to dist/mcp/index.js relative to this CLI script
+      // Resolve paths relative to this CLI script
       const mcpEntryPath = resolve(__dirname, 'mcp', 'index.js');
       const hookEntryPath = resolve(__dirname, 'hooks', 'check-inbox.js');
+      const statusLinePath = resolve(__dirname, '..', 'bin', 'bridge-status-line.sh');
+      const projectDir = process.cwd();
 
       // --- Write .mcp.json ---
       const mcpConfigPath = resolve(process.cwd(), '.mcp.json');
@@ -179,6 +181,7 @@ program
           BRIDGE_CODE: opts.code,
           BRIDGE_NAME: opts.name,
           BRIDGE_WORKER_URL: opts.workerUrl,
+          BRIDGE_PROJECT_DIR: projectDir,
         },
       };
       mcpConfig.mcpServers = mcpServers;
@@ -217,8 +220,15 @@ program
       ];
       settings.hooks = hooks;
 
+      // Status line: show unread message count
+      settings.statusLine = {
+        type: 'command',
+        command: `bash ${statusLinePath} ${projectDir}`,
+        refreshInterval: 10,
+      };
+
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
-      console.log(`Wrote hook config to ${settingsPath}`);
+      console.log(`Wrote hook + status line config to ${settingsPath}`);
 
       // --- Pre-create counts.json for status line ---
       const bridgeDir = resolve(process.cwd(), '.claude-bridge');
