@@ -1,10 +1,10 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code when working in this repository.
 
 ## What This Is
 
-E2E encrypted multi-party Claude Code collaboration. N Claude Code instances on different machines communicate through a Cloudflare Workers relay. All messages are pairwise-encrypted with libsodium. The relay sees only opaque blobs.
+E2E encrypted multi-party Claude Code collaboration. N instances on different machines communicate through a Cloudflare Workers relay. All messages are pairwise-encrypted with libsodium. The relay sees only opaque blobs.
 
 ## Architecture
 
@@ -14,14 +14,36 @@ Claude A ←stdio→ MCP Server ←WSS→ CF Durable Object (relay) ←WSS→ MC
                                     message log, zero-knowledge)
 ```
 
-- **DO maintains member registry**: fingerprint, publicKey, name, online status. New member gets full member list on connect; existing members get `member_joined` push.
-- **MCP Server (single process)**: stdio for Claude Code + WebSocket to DO. Computes pairwise shared secrets from member public keys on connect.
-- **Multi-recipient encryption**: each message encrypted separately per peer (pairwise X25519 DH + XSalsa20-Poly1305). Wire format: `{from: fingerprint, recipients: {fp: blob, ...}}`.
+- **DO maintains member registry**: fingerprint, publicKey, name, online status.
+- **MCP Server (single process)**: stdio for Claude Code + WebSocket to DO. Computes pairwise shared secrets on connect.
+- **Pairwise encryption**: each message encrypted separately per recipient (X25519 DH + XSalsa20-Poly1305). Wire format: `{from: fingerprint, recipients: {fp: blob, ...}}`.
+- **Targeted sending**: `encryptAndSendTo` sends to specific peers (used for replies). `encryptAndSend` broadcasts to all.
 - **Two tsconfigs**: `tsconfig.json` for Node code (NodeNext), `tsconfig.worker.json` for CF Worker (bundler).
+
+## Identity & Alias
+
+Each instance has a **required alias** (`BRIDGE_NAME` env / `--name` CLI flag) and a **pubkey fingerprint** (BLAKE2b first 4 bytes → 8 hex chars). Both are stored in the DO member registry. Tools display peers as `name (fingerprint)`.
+
+## Message Reply Workflow
+
+Replies follow a **draft → human confirm → send** flow:
+
+1. Sub-agent reads message via `bridge_read`, drafts reply via `bridge_draft_reply`
+2. Sub-agent returns draft to main agent, which presents it to the human
+3. Human confirms/edits content, chooses CC recipients
+4. Main agent calls `bridge_reply(id, body, cc?, cc_context?)` to send
+5. Reply goes to original sender only (targeted); CC copies go to specified peers with context
+
+**Never skip the human confirmation step.**
+
+## Sub-agent Message Processing
+
+Incoming messages trigger a `UserPromptSubmit` hook. The hook instructs Claude to dispatch message processing to a **sub-agent** (via Agent tool) to avoid polluting the main conversation context. The sub-agent reads messages and drafts replies; the main agent handles human interaction and final send.
 
 ## Commands
 
 ```bash
+npm run build                               # compile TypeScript to dist/
 npm test                                    # unit tests (60 tests)
 npx vitest run --exclude 'src/integration/**'  # unit only (skip wrangler)
 npx vitest run src/shared/crypto.test.ts    # single test file
@@ -33,8 +55,8 @@ npx wrangler deploy                         # deploy to Cloudflare
 
 ## Key Constraints
 
-- **NEVER `console.log()` in `src/mcp/`** — corrupts stdio JSON-RPC. Use `console.error()` only. The hook script (`src/hooks/`) and CLI (`src/cli.ts`) MAY use `console.log`.
-- **ESM with `.js` extensions** — all imports must use `.js` suffix (`import { foo } from './bar.js'`).
+- **NEVER `console.log()` in `src/mcp/`** — corrupts stdio JSON-RPC. Use `console.error()` only. Hook scripts and CLI MAY use `console.log`.
+- **ESM with `.js` extensions** — all imports must use `.js` suffix.
 - **libsodium CJS workaround** — `libsodium-wrappers` ESM is broken on Node 25. Must use `createRequire` to load CJS bundle (see `src/shared/crypto.ts`).
 - **Max message size**: 256KB before encryption.
 - **Worker env is NOT Node.js** — `src/worker/` runs on CF Workers runtime. No `fs`, `path`, `node:` imports.
@@ -43,27 +65,45 @@ npx wrangler deploy                         # deploy to Cloudflare
 
 | Directory | Runtime | I/O | Notes |
 |-----------|---------|-----|-------|
-| `src/shared/` | Any | None | Pure logic: crypto, protocol types, serialize/deserialize |
+| `src/shared/` | Any | None | Pure logic: crypto, protocol types |
 | `src/worker/` | CF Workers | DO storage, WebSocket | Separate tsconfig. No Node imports |
 | `src/mcp/` | Node.js | stdio, WebSocket, filesystem | MCP server + tools. Never console.log |
-| `src/hooks/` | Node.js | filesystem, stdout | Standalone script, MAY console.log |
+| `src/hooks/` | Node.js | filesystem, stdout | Hook script, MAY console.log |
 | `src/cli.ts` | Node.js | filesystem, network, stdout | MAY console.log |
+
+## MCP Tools
+
+**Room:**
+- `bridge_status()` — connection info, peer list, inbox counts
+- `bridge_members()` — list all instances (self + peers) with name, fingerprint, role
+
+**Messaging:**
+- `bridge_send(title, body)` — broadcast to all peers
+- `bridge_inbox()` — list messages with read/unread, sender names
+- `bridge_read(id)` — read full message, mark as read
+- `bridge_draft_reply(id, draft_body, suggested_cc?)` — draft reply for human review (does NOT send)
+- `bridge_reply(id, body, cc?, cc_context?)` — send confirmed reply; targeted to sender, optional CC
+
+**Tasks:**
+- `bridge_send_task(description, context, priority)` — dispatch task to all peers
+- `bridge_get_tasks(status?)` — list tasks
+- `bridge_update_task(id, status, result?)` — update + notify peers
+- `bridge_cancel_task(id, reason?)` — cancel + notify peers
+
+**Shared state:**
+- `bridge_get_context()` / `bridge_set_context(key, value)` — synced KV store
 
 ## Data Flow
 
-1. Claude calls MCP tool (e.g. `bridge_send`) → `tools.ts`
-2. `encryptAndSend` serializes message, encrypts per-peer → WebSocket relay envelope
-3. DO broadcasts to other sockets → peer MCP servers receive
-4. Peer decrypts with sender's pairwise secret → `handleDecryptedMessage` dispatches by type
-5. Chat → `state.inbox` Map + `counts.json` + hook inbox file
-6. Task → `state.tasks` Map + hook inbox file
-
-## Identity
-
-Each instance identified by **pubkey fingerprint** (BLAKE2b first 4 bytes → 8 hex chars). Used as `from` field in messages and as key in `recipients` map. DO stores fingerprint → publicKey mapping in member registry.
+1. Claude calls MCP tool → `tools.ts`
+2. `encryptAndSend` (broadcast) or `encryptAndSendTo` (targeted) → WebSocket relay
+3. DO broadcasts to recipients → peer MCP servers decrypt
+4. `handleDecryptedMessage` dispatches: chat → inbox + hook file, task → tasks + hook file
+5. Hook reads `~/.claude-bridge/inbox.json` on next user input → injects into prompt
+6. Claude spawns sub-agent to process messages → draft → human confirm → send
 
 ## Design Docs
 
 - `docs/design.md` — original design document
-- `docs/implementation-plan.md` — implementation plan with spike findings
+- `docs/implementation-plan.md` — implementation plan
 - `docs/test-plan.md` — test coverage targets

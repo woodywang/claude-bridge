@@ -29,6 +29,12 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const myName = process.env.BRIDGE_NAME;
+  if (!myName) {
+    console.error('[bridge] BRIDGE_NAME is required (alias for this instance)');
+    process.exit(1);
+  }
+
   let roomCode = process.env.BRIDGE_CODE ?? '';
   const workerUrl = process.env.BRIDGE_WORKER_URL;
   if (!workerUrl) {
@@ -82,6 +88,7 @@ async function main(): Promise<void> {
   const state: BridgeState = {
     role,
     roomCode,
+    myName,
     ws: null!, // set below after creating WebSocket
     keypair,
     myFingerprint,
@@ -146,7 +153,7 @@ async function main(): Promise<void> {
 
   console.error('[bridge] MCP server started (stdio transport)');
   console.error(
-    `[bridge] Role=${role}, Room=${roomCode}, WS=${ws.connected ? 'connected' : 'disconnected'}`,
+    `[bridge] Name=${myName}, Role=${role}, Room=${roomCode}, WS=${ws.connected ? 'connected' : 'disconnected'}`,
   );
 
   // Periodically refresh counts.json to keep it fresh (status line ignores files >30s old)
@@ -220,6 +227,7 @@ function handleMembers(data: Record<string, unknown>, state: BridgeState): void 
       const sharedSecret = computeSharedSecret(peerPublicKey, state.keypair.privateKey);
       state.peers.set(member.fingerprint, {
         fingerprint: member.fingerprint,
+        name: member.name,
         publicKey: peerPublicKey,
         sharedSecret,
       });
@@ -241,6 +249,7 @@ function handleMemberJoined(data: Record<string, unknown>, state: BridgeState): 
     const sharedSecret = computeSharedSecret(peerPublicKey, state.keypair.privateKey);
     state.peers.set(member.fingerprint, {
       fingerprint: member.fingerprint,
+      name: member.name,
       publicKey: peerPublicKey,
       sharedSecret,
     });
@@ -313,6 +322,8 @@ function handleEncryptedMessage(
 }
 
 function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): void {
+  const senderName = state.peers.get(message.from)?.name;
+
   switch (message.type) {
     case 'task': {
       const taskPayload = message.payload as TaskPayload;
@@ -334,6 +345,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
         id: message.id,
         type: 'task',
         from: message.from,
+        fromName: senderName,
         timestamp: message.timestamp,
         summary: `[${taskPayload.priority}] ${taskPayload.description}`,
       };
@@ -368,6 +380,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
         id: message.id,
         type: 'result',
         from: message.from,
+        fromName: senderName,
         timestamp: message.timestamp,
         summary: `Task ${resultPayload.taskId} -> ${resultPayload.status}${resultPayload.summary ? ': ' + resultPayload.summary : ''}`,
       };
@@ -432,6 +445,7 @@ function handleDecryptedMessage(message: BridgeMessage, state: BridgeState): voi
         id: message.id,
         type: message.type,
         from: message.from,
+        fromName: senderName,
         timestamp: message.timestamp,
         summary:
           message.type === 'chat'
@@ -464,9 +478,9 @@ function sendRegister(state: BridgeState): void {
     type: 'register',
     fingerprint: state.myFingerprint,
     publicKey: pubKeyB64,
-    name: state.role, // use role as display name for now
+    name: state.myName,
   }));
-  console.error(`[bridge] Registered with room (fingerprint: ${state.myFingerprint})`);
+  console.error(`[bridge] Registered with room as "${state.myName}" (fingerprint: ${state.myFingerprint})`);
 }
 
 // ---------------------------------------------------------------------------

@@ -13,6 +13,7 @@ export interface InboxEntry {
   id: string;
   type: string;
   from: string;
+  fromName?: string;
   timestamp: number;
   summary: string; // human-readable summary of the message
 }

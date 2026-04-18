@@ -44,10 +44,10 @@ program
       console.log(`Room created: ${code}`);
       console.log('');
       console.log('To connect from this machine:');
-      console.log(`  claude-bridge mcp-install --role host --code ${code}`);
+      console.log(`  claude-bridge mcp-install --role host --code ${code} --name <your-alias>`);
       console.log('');
       console.log('To connect from the other machine:');
-      console.log(`  claude-bridge mcp-install --role peer --code ${code}`);
+      console.log(`  claude-bridge mcp-install --role peer --code ${code} --name <your-alias>`);
       console.log('');
       console.log('Then restart Claude Code on both machines.');
     } catch (err) {
@@ -74,7 +74,7 @@ program
     console.log(`Joining room: ${code}`);
     console.log('');
     console.log('Run:');
-    console.log(`  claude-bridge mcp-install --role peer --code ${code}`);
+    console.log(`  claude-bridge mcp-install --role peer --code ${code} --name <your-alias>`);
     console.log('');
     console.log('Then restart Claude Code.');
   });
@@ -133,9 +133,10 @@ program
   )
   .requiredOption('--role <role>', 'Role: host or peer')
   .requiredOption('--code <code>', 'Room code (6-char uppercase alphanumeric)')
+  .requiredOption('--name <name>', 'Display name / alias for this instance')
   .option('--worker-url <url>', 'Worker URL', DEFAULT_WORKER_URL)
   .action(
-    (opts: { role: string; code: string; workerUrl: string }) => {
+    (opts: { role: string; code: string; name: string; workerUrl: string }) => {
       // Validate role
       if (opts.role !== 'host' && opts.role !== 'peer') {
         console.error(
@@ -176,6 +177,7 @@ program
         env: {
           BRIDGE_ROLE: opts.role,
           BRIDGE_CODE: opts.code,
+          BRIDGE_NAME: opts.name,
           BRIDGE_WORKER_URL: opts.workerUrl,
         },
       };
@@ -232,7 +234,7 @@ program
       console.log('');
       console.log('Done! Restart Claude Code to activate the bridge.');
       console.log(
-        `  Role: ${opts.role}, Room: ${opts.code}, Worker: ${opts.workerUrl}`,
+        `  Name: ${opts.name}, Role: ${opts.role}, Room: ${opts.code}, Worker: ${opts.workerUrl}`,
       );
     },
   );

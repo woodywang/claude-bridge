@@ -39,6 +39,7 @@ export interface InboxMessage {
 
 export interface PeerInfo {
   fingerprint: string;
+  name?: string;
   publicKey: Uint8Array;
   sharedSecret: Uint8Array;
 }
@@ -46,6 +47,7 @@ export interface PeerInfo {
 export interface BridgeState {
   role: 'host' | 'peer';
   roomCode: string;
+  myName: string;               // user-configured alias
   ws: BridgeWebSocket;
   keypair: Keypair;
   myFingerprint: string;       // own pubkey fingerprint
@@ -98,6 +100,42 @@ function encryptAndSend(
   for (const [fp, peer] of state.peers) {
     const encrypted = encrypt(serialized, peer.sharedSecret);
     recipients[fp] = Buffer.from(encrypted).toString('base64');
+  }
+
+  const envelope = JSON.stringify({
+    type: 'relay',
+    payload: {
+      dataType: 'encrypted',
+      from: state.myFingerprint,
+      recipients,
+    },
+  });
+  state.ws.send(envelope);
+
+  return { plaintextBytes: serialized.byteLength, recipientCount: Object.keys(recipients).length };
+}
+
+/**
+ * Helper: encrypt a BridgeMessage and send to specific peers only.
+ * Used for targeted replies and CC.
+ */
+function encryptAndSendTo(
+  msg: BridgeMessage,
+  state: BridgeState,
+  targetFingerprints: string[],
+): { plaintextBytes: number; recipientCount: number } {
+  const serialized = serializeMessage(msg);
+
+  const recipients: Record<string, string> = {};
+  for (const fp of targetFingerprints) {
+    const peer = state.peers.get(fp);
+    if (!peer) continue;
+    const encrypted = encrypt(serialized, peer.sharedSecret);
+    recipients[fp] = Buffer.from(encrypted).toString('base64');
+  }
+
+  if (Object.keys(recipients).length === 0) {
+    throw new Error('No valid recipients found');
   }
 
   const envelope = JSON.stringify({
@@ -166,6 +204,20 @@ function formatRelativeTime(timestamp: number): string {
 // Helper: find message by full or partial ID
 // ---------------------------------------------------------------------------
 
+function peerDisplayName(state: BridgeState, fingerprint: string): string {
+  const peer = state.peers.get(fingerprint);
+  return peer?.name ? `${peer.name} (${fingerprint})` : fingerprint;
+}
+
+function findPeerByNameOrFp(state: BridgeState, nameOrFp: string): PeerInfo | undefined {
+  const byFp = state.peers.get(nameOrFp);
+  if (byFp) return byFp;
+  for (const peer of state.peers.values()) {
+    if (peer.name && peer.name.toLowerCase() === nameOrFp.toLowerCase()) return peer;
+  }
+  return undefined;
+}
+
 function findMessageById(state: BridgeState, id: string): InboxMessage | undefined {
   // Try exact match first
   const exact = state.inbox.get(id);
@@ -192,14 +244,41 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       const unread = [...state.inbox.values()].filter((m) => !m.read).length;
       return textResult(JSON.stringify({
         role: state.role,
+        myName: state.myName,
         roomCode: state.roomCode,
         myFingerprint: state.myFingerprint,
         wsConnected: state.ws.connected,
-        peers: [...state.peers.keys()],
+        peers: [...state.peers.values()].map((p) => ({
+          fingerprint: p.fingerprint,
+          name: p.name,
+        })),
         peerCount: state.peers.size,
         inboxTotal: state.inbox.size,
         inboxUnread: unread,
       }, null, 2));
+    },
+  );
+
+  // bridge_members — list all members in the room
+  server.tool(
+    'bridge_members',
+    'List all members (Claude Code instances) in the room, including self',
+    {},
+    async () => {
+      const self = {
+        fingerprint: state.myFingerprint,
+        name: state.myName,
+        role: state.role,
+        isSelf: true,
+        online: state.ws.connected,
+      };
+      const peers = [...state.peers.values()].map((p) => ({
+        fingerprint: p.fingerprint,
+        name: p.name ?? 'unknown',
+        isSelf: false,
+      }));
+      const members = [self, ...peers];
+      return textResult(JSON.stringify({ count: members.length, members }, null, 2));
     },
   );
 
@@ -247,7 +326,8 @@ export function registerTools(server: McpServer, state: BridgeState): void {
         const readMarker = m.read ? '[ ]' : '[●]';
         const idShort = m.id.substring(0, 8);
         const timeRel = formatRelativeTime(m.timestamp);
-        return `  ${readMarker} ${idShort} | ${m.from} | ${m.title} | ${timeRel}`;
+        const sender = peerDisplayName(state, m.from);
+        return `  ${readMarker} ${idShort} | ${sender} | ${m.title} | ${timeRel}`;
       });
 
       const header = `📬 ${messages.length} messages (${unread} unread)`;
@@ -274,8 +354,9 @@ export function registerTools(server: McpServer, state: BridgeState): void {
       const date = new Date(message.timestamp);
       const dateStr = date.toISOString().replace('T', ' ').substring(0, 16);
 
+      const sender = peerDisplayName(state, message.from);
       const parts = [
-        `From: ${message.from}`,
+        `From: ${sender}`,
         `Date: ${dateStr}`,
         `Title: ${message.title}`,
         '',
@@ -289,15 +370,72 @@ export function registerTools(server: McpServer, state: BridgeState): void {
     },
   );
 
-  // bridge_reply — reply to a specific message
+  // bridge_draft_reply — draft a reply for human review (does NOT send)
   server.tool(
-    'bridge_reply',
-    'Reply to a message. Sends a new message with "Re: <original_title>" as title.',
+    'bridge_draft_reply',
+    'Draft a reply to a message for human review. Returns the original message context, peer list for CC, and a template. Does NOT send anything — the human must review and approve before calling bridge_reply.',
     {
       id: z.string().describe('Full or partial (first 8 chars) message ID to reply to'),
-      body: z.string().describe('Reply body text'),
+      draft_body: z.string().describe('Proposed reply body for the human to review'),
+      suggested_cc: z
+        .array(z.string())
+        .optional()
+        .describe('Suggested peer names to CC (human can modify)'),
     },
-    async ({ id, body }) => {
+    async ({ id, draft_body, suggested_cc }) => {
+      const original = findMessageById(state, id);
+      if (!original) {
+        return errorResult(`Message not found: ${id}`);
+      }
+
+      const sender = peerDisplayName(state, original.from);
+      const reTitle = original.title.startsWith('Re: ')
+        ? original.title
+        : `Re: ${original.title}`;
+
+      // Build available peers list for CC selection
+      const availablePeers = [...state.peers.values()]
+        .filter((p) => p.fingerprint !== original.from) // exclude original sender
+        .map((p) => ({ name: p.name ?? 'unknown', fingerprint: p.fingerprint }));
+
+      return textResult(JSON.stringify({
+        action: 'draft_reply',
+        originalMessage: {
+          id: original.id,
+          from: sender,
+          fromFingerprint: original.from,
+          title: original.title,
+          body: original.body,
+          timestamp: original.timestamp,
+        },
+        draft: {
+          title: reTitle,
+          body: draft_body,
+        },
+        suggestedCC: suggested_cc ?? [],
+        availablePeersForCC: availablePeers,
+        instructions: '请将以上草稿展示给人类用户确认。用户可以修改回复内容、选择是否抄送其他 peer。确认后调用 bridge_reply 发送。',
+      }, null, 2));
+    },
+  );
+
+  // bridge_reply — send a confirmed reply (human must have approved)
+  server.tool(
+    'bridge_reply',
+    'Send a confirmed reply to a message. IMPORTANT: The human user MUST have reviewed and approved the reply content before calling this tool. Optionally CC other peers with additional context.',
+    {
+      id: z.string().describe('Full or partial (first 8 chars) message ID to reply to'),
+      body: z.string().describe('Reply body text (confirmed by the human user)'),
+      cc: z
+        .array(z.string())
+        .optional()
+        .describe('Peer names or fingerprints to CC on this reply'),
+      cc_context: z
+        .string()
+        .optional()
+        .describe('Additional context to prepend for CC recipients (e.g. background info they need)'),
+    },
+    async ({ id, body, cc, cc_context }) => {
       const err = requireConnected(state);
       if (err) return err;
 
@@ -311,15 +449,60 @@ export function registerTools(server: McpServer, state: BridgeState): void {
           ? original.title
           : `Re: ${original.title}`;
 
-        const msg = createBridgeMessage('chat', state.myFingerprint, {
+        // Send reply to original sender (targeted)
+        const replyMsg = createBridgeMessage('chat', state.myFingerprint, {
           title: reTitle,
           body,
           replyTo: original.id,
         } satisfies ChatPayload);
 
-        encryptAndSend(msg, state);
+        encryptAndSendTo(replyMsg, state, [original.from]);
+        const sentTo = [peerDisplayName(state, original.from)];
 
-        return textResult(`Replied to "${original.title}": ${reTitle}`);
+        // Send CC copies to other peers if specified
+        const ccSentTo: string[] = [];
+        if (cc && cc.length > 0) {
+          const ccFingerprints: string[] = [];
+          const notFound: string[] = [];
+          for (const nameOrFp of cc) {
+            const peer = findPeerByNameOrFp(state, nameOrFp);
+            if (peer) {
+              ccFingerprints.push(peer.fingerprint);
+            } else {
+              notFound.push(nameOrFp);
+            }
+          }
+
+          if (ccFingerprints.length > 0) {
+            const ccBody = cc_context
+              ? `[CC] 上下文: ${cc_context}\n\n---\n原始消息来自 ${peerDisplayName(state, original.from)}:\n> ${original.title}\n> ${original.body}\n\n---\n回复:\n${body}`
+              : `[CC] 回复 ${peerDisplayName(state, original.from)} 的消息 "${original.title}":\n\n${body}`;
+
+            const ccMsg = createBridgeMessage('chat', state.myFingerprint, {
+              title: `[CC] ${reTitle}`,
+              body: ccBody,
+              replyTo: original.id,
+            } satisfies ChatPayload);
+
+            encryptAndSendTo(ccMsg, state, ccFingerprints);
+
+            for (const fp of ccFingerprints) {
+              ccSentTo.push(peerDisplayName(state, fp));
+            }
+          }
+
+          if (notFound.length > 0) {
+            return textResult(
+              `Reply sent to ${sentTo.join(', ')}` +
+              (ccSentTo.length > 0 ? `. CC sent to ${ccSentTo.join(', ')}` : '') +
+              `. CC peers not found: ${notFound.join(', ')}`,
+            );
+          }
+        }
+
+        const result = `Reply sent to ${sentTo.join(', ')}` +
+          (ccSentTo.length > 0 ? `. CC sent to ${ccSentTo.join(', ')}` : '');
+        return textResult(result);
       } catch (e) {
         return errorResult(`Error sending reply: ${(e as Error).message}`);
       }
