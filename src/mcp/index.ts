@@ -144,6 +144,9 @@ async function main(): Promise<void> {
   console.error(
     `[bridge] Role=${role}, Room=${roomCode}, WS=${ws.connected ? 'connected' : 'disconnected'}`,
   );
+
+  // Periodically refresh counts.json to keep it fresh (status line ignores files >30s old)
+  setInterval(() => syncCounts(state), 10_000);
 }
 
 // ---------------------------------------------------------------------------
