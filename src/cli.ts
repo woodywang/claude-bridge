@@ -218,6 +218,17 @@ program
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
       console.log(`Wrote hook config to ${settingsPath}`);
 
+      // --- Pre-create counts.json for status line ---
+      const bridgeDir = resolve(process.cwd(), '.claude-bridge');
+      if (!existsSync(bridgeDir)) {
+        mkdirSync(bridgeDir, { recursive: true });
+      }
+      const countsPath = resolve(bridgeDir, 'counts.json');
+      if (!existsSync(countsPath)) {
+        writeFileSync(countsPath, '{"unreadChat":0,"pendingTasks":0,"total":0}');
+      }
+      console.log(`Initialized counts file at ${countsPath}`);
+
       console.log('');
       console.log('Done! Restart Claude Code to activate the bridge.');
       console.log(

@@ -37,13 +37,13 @@ async function main(): Promise<void> {
   // -----------------------------------------------------------------------
   // 2. Initialize crypto
   // -----------------------------------------------------------------------
+  // Init counts file FIRST — status line reads this on Claude Code startup
+  const projectDir = process.env.BRIDGE_PROJECT_DIR ?? process.cwd();
+  initCounts(projectDir);
+
   console.error('[bridge] Initializing crypto...');
   await initCrypto();
   ensureInboxDir();
-
-  // Init counts file in project dir (where MCP server was started from)
-  const projectDir = process.env.BRIDGE_PROJECT_DIR ?? process.cwd();
-  initCounts(projectDir);
 
   // -----------------------------------------------------------------------
   // 3. If host and no code, create room via HTTP POST
