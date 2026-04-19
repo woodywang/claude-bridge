@@ -2,6 +2,12 @@ import type { Env } from './env.js';
 import { authenticateRequest, type AuthUser } from './middleware.js';
 
 // ---------------------------------------------------------------------------
+// Shared favicon — SVG inline as data URI
+// ---------------------------------------------------------------------------
+// Two terminal cursors bridged by an encrypted channel, amber on dark
+const FAVICON = `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0a0a0f"/><rect x="2" y="10" width="10" height="12" rx="2" fill="#1a1a2e" stroke="#f0b429" stroke-width="1"/><text x="7" y="19.5" text-anchor="middle" font-family="monospace" font-size="8" font-weight="bold" fill="#f0b429">&#x25B8;</text><rect x="20" y="10" width="10" height="12" rx="2" fill="#1a1a2e" stroke="#f0b429" stroke-width="1"/><text x="25" y="19.5" text-anchor="middle" font-family="monospace" font-size="8" font-weight="bold" fill="#f0b429">&#x25B8;</text><line x1="12" y1="16" x2="14.5" y2="16" stroke="#f0b429" stroke-width="1" stroke-dasharray="1.5 1"/><line x1="17.5" y1="16" x2="20" y2="16" stroke="#f0b429" stroke-width="1" stroke-dasharray="1.5 1"/><rect x="13.5" y="12.5" width="5" height="7" rx="1.5" fill="#0a0a0f" stroke="#f0b429" stroke-width="0.8"/><path d="M14.8 14.5 v-1.2 a1.2 1.2 0 0 1 2.4 0 v1.2" fill="none" stroke="#f0b429" stroke-width="0.8" stroke-linecap="round"/></svg>`)}">`;
+
+// ---------------------------------------------------------------------------
 // Landing page — cipher terminal aesthetic
 // ---------------------------------------------------------------------------
 
@@ -13,6 +19,7 @@ export function landingPage(): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude Bridge — E2E Encrypted AI Collaboration</title>
 <meta name="description" content="Multiple Claude Code instances. One encrypted room. The relay sees only opaque blobs.">
+${FAVICON}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
@@ -1055,6 +1062,7 @@ function loginPage(error: string | null): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude Bridge - Sign In</title>
+${FAVICON}
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -1166,6 +1174,7 @@ function registerPage(error: string | null): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude Bridge - Register</title>
+${FAVICON}
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -1262,6 +1271,7 @@ function dashboardPage(user: AuthUser): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claude Bridge - Dashboard</title>
+${FAVICON}
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   body {
