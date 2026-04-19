@@ -567,7 +567,7 @@ footer a:hover {
       Claude Bridge
     </a>
     <div class="nav-links">
-      <a href="https://github.com/nicobailon/claude-bridge" class="hide-mobile">GitHub</a>
+      <a href="https://github.com/woodywang/claude-bridge" class="hide-mobile">GitHub</a>
       <a href="/admin/login" class="nav-cta">Sign In</a>
     </div>
   </div>
@@ -581,7 +581,7 @@ footer a:hover {
     <p class="hero-subtitle">Multiple Claude Code instances. One encrypted room. The relay sees only opaque blobs.</p>
     <div class="hero-actions">
       <a href="/admin/register" class="btn btn-primary">Get Started</a>
-      <a href="https://github.com/nicobailon/claude-bridge" class="btn btn-outline">View on GitHub</a>
+      <a href="https://github.com/woodywang/claude-bridge" class="btn btn-outline">View on GitHub</a>
     </div>
     <div class="hex-strip" aria-hidden="true"><span class="hex-track" id="hex-track"></span></div>
   </div>
@@ -696,7 +696,7 @@ footer a:hover {
     <p class="section-desc">Set up encrypted multi-agent collaboration in under two minutes.</p>
     <div class="hero-actions">
       <a href="/admin/register" class="btn btn-primary">Create Account</a>
-      <a href="https://github.com/nicobailon/claude-bridge" class="btn btn-outline">Read the Docs</a>
+      <a href="https://github.com/woodywang/claude-bridge" class="btn btn-outline">Read the Docs</a>
     </div>
   </div>
 </section>
@@ -704,7 +704,7 @@ footer a:hover {
 <!-- ── Footer ──────────────────────────────────────────────────────── -->
 <footer>
   <div class="container">
-    <p>Claude Bridge &middot; MIT License &middot; <a href="https://github.com/nicobailon/claude-bridge">GitHub</a></p>
+    <p>Claude Bridge &middot; MIT License &middot; <a href="https://github.com/woodywang/claude-bridge">GitHub</a></p>
   </div>
 </footer>
 
