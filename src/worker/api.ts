@@ -163,7 +163,7 @@ async function handleTokenList(user: AuthUser, env: Env): Promise<Response> {
     last4: t.tokenPrefix.slice(-4),
   }));
 
-  return jsonResponse({ tokens });
+  return jsonResponse({ email: user.email, name: user.name, tokens });
 }
 
 async function handleTokenDelete(prefix: string, user: AuthUser, env: Env): Promise<Response> {
