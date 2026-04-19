@@ -1,6 +1,10 @@
 export { BridgeRoom } from './durable-object.js';
 export type { Env } from './env.js';
 import type { Env } from './env.js';
+import { handleAuth } from './auth.js';
+import { handleApi } from './api.js';
+import { handleAdmin } from './pages.js';
+import { jsonResponse } from './middleware.js';
 
 // ---------------------------------------------------------------------------
 // Room code generation
@@ -48,12 +52,38 @@ export default {
       });
     }
 
-    // Create room
+    // -----------------------------------------------------------------------
+    // Auth routes (/auth/*)
+    // -----------------------------------------------------------------------
+    if (path.startsWith('/auth/')) {
+      const res = await handleAuth(request, url, env);
+      if (res) return res;
+    }
+
+    // -----------------------------------------------------------------------
+    // Admin pages (/admin/*)
+    // -----------------------------------------------------------------------
+    if (path.startsWith('/admin/')) {
+      const res = await handleAdmin(request, url, env);
+      if (res) return res;
+    }
+
+    // -----------------------------------------------------------------------
+    // API routes (/api/*)
+    // -----------------------------------------------------------------------
+    if (path.startsWith('/api/')) {
+      const res = await handleApi(request, url, env);
+      if (res) return res;
+    }
+
+    // -----------------------------------------------------------------------
+    // Legacy room create — direct callers to web dashboard
+    // -----------------------------------------------------------------------
     if (path === '/room/create' && request.method === 'POST') {
-      const code = generateRoomCode();
-      return new Response(JSON.stringify({ code }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return jsonResponse(
+        { error: 'This endpoint is deprecated. Use the web dashboard at /admin/dashboard to create rooms.' },
+        401,
+      );
     }
 
     // GET /room/:code/members — return member list from DO
@@ -65,10 +95,21 @@ export default {
       return stub.fetch(new Request(new URL('/members', request.url).toString()));
     }
 
-    // WebSocket upgrade to room
+    // WebSocket upgrade to room — with join secret validation
     const wsMatch = path.match(/^\/room\/([A-Z0-9]{6})\/ws$/);
     if (wsMatch) {
       const code = wsMatch[1];
+
+      // Validate join secret if the room was created through the dashboard
+      const roomData = await env.SESSIONS.get(`room:${code}`, 'json') as { joinSecret: string } | null;
+      if (roomData) {
+        const secret = url.searchParams.get('secret');
+        if (secret !== roomData.joinSecret) {
+          return new Response('Invalid join secret', { status: 403 });
+        }
+      }
+      // If no room data in KV (legacy/local dev), allow without secret
+
       const id = env.ROOM.idFromName(code);
       const stub = env.ROOM.get(id);
       return stub.fetch(request);
