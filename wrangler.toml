@@ -3,8 +3,8 @@ main = "src/worker/index.ts"
 compatibility_date = "2024-09-02"
 
 [vars]
-OAUTH_REDIRECT_URI = "https://claude-bridge.workers.dev/auth/callback"
-ADMIN_ORIGIN = "https://claude-bridge.workers.dev"
+OAUTH_REDIRECT_URI = "https://claude-bridge.woodywang2013.workers.dev/auth/callback"
+ADMIN_ORIGIN = "https://claude-bridge.woodywang2013.workers.dev"
 
 [durable_objects]
 bindings = [
@@ -13,7 +13,7 @@ bindings = [
 
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "placeholder-create-via-wrangler-kv-namespace-create"
+id = "ff7dd365b2974c28b7ad416563e4503f"
 
 [[migrations]]
 tag = "v1"
