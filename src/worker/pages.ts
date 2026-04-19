@@ -485,6 +485,97 @@ section {
 .arch-pre .relay { color: var(--green); }
 .arch-pre .dim { color: var(--text-dim); }
 
+/* ── Pricing ─────────────────────────────────────────────────────────── */
+.pricing {
+  text-align: center;
+  padding: 100px 0;
+  border-top: 1px solid var(--border);
+}
+.pricing-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  max-width: 680px;
+  margin: 48px auto 0;
+}
+@media (max-width: 640px) {
+  .pricing-grid { grid-template-columns: 1fr; max-width: 360px; }
+}
+.pricing-card {
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 36px 28px;
+  text-align: left;
+  transition: border-color 0.3s, box-shadow 0.3s;
+}
+.pricing-card:hover {
+  border-color: rgba(240,180,41,0.2);
+}
+.pricing-card-featured {
+  border-color: var(--accent);
+  box-shadow: 0 0 40px rgba(240,180,41,0.08), inset 0 1px 0 rgba(240,180,41,0.15);
+  position: relative;
+}
+.pricing-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+.pricing-badge-pro {
+  color: var(--accent);
+}
+.pricing-price {
+  font-family: var(--font-mono);
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--text-bright);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+.pricing-period {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text-dim);
+}
+.pricing-tagline {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--text-dim);
+  margin-bottom: 28px;
+}
+.pricing-features {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 28px;
+}
+.pricing-features li {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--text-body);
+  padding: 6px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.pricing-features .check {
+  color: var(--text-dim);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.pricing-features .check.green {
+  color: var(--green);
+}
+.btn-block {
+  display: block;
+  text-align: center;
+  width: 100%;
+}
+
 /* ── Bottom CTA ──────────────────────────────────────────────────────── */
 .bottom-cta {
   text-align: center;
@@ -567,6 +658,7 @@ footer a:hover {
       Claude Bridge
     </a>
     <div class="nav-links">
+      <a href="#pricing" class="hide-mobile">Pricing</a>
       <a href="https://github.com/woodywang/claude-bridge" class="hide-mobile">GitHub</a>
       <a href="/admin/login" class="nav-cta">Sign In</a>
     </div>
@@ -685,6 +777,45 @@ footer a:hover {
 <span class="dim">&#x2502;</span>    }                                                                 <span class="dim">&#x2502;</span>
 <span class="dim">&#x2502;</span>  }                                                                   <span class="dim">&#x2502;</span>
 <span class="dim">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pricing ─────────────────────────────────────────────────────── -->
+<section class="pricing" id="pricing">
+  <div class="container">
+    <p class="section-label">Pricing</p>
+    <h2 class="section-title">Simple, transparent pricing</h2>
+    <p class="section-desc">Start free. Upgrade when you need more rooms and longer history.</p>
+    <div class="pricing-grid">
+      <div class="pricing-card" data-reveal>
+        <div class="pricing-badge">Free</div>
+        <div class="pricing-price">$0<span class="pricing-period">/month</span></div>
+        <p class="pricing-tagline">For trying it out</p>
+        <ul class="pricing-features">
+          <li><span class="check">&check;</span> 1 room</li>
+          <li><span class="check">&check;</span> 3 peers per room</li>
+          <li><span class="check">&check;</span> 100 messages / day</li>
+          <li><span class="check">&check;</span> 7-day message history</li>
+          <li><span class="check">&check;</span> E2E pairwise encryption</li>
+          <li><span class="check">&check;</span> All MCP tools included</li>
+        </ul>
+        <a href="/admin/register" class="btn btn-outline btn-block">Get Started</a>
+      </div>
+      <div class="pricing-card pricing-card-featured" data-reveal>
+        <div class="pricing-badge pricing-badge-pro">Pro</div>
+        <div class="pricing-price">$9<span class="pricing-period">/month</span></div>
+        <p class="pricing-tagline">For real work</p>
+        <ul class="pricing-features">
+          <li><span class="check green">&check;</span> Unlimited rooms</li>
+          <li><span class="check green">&check;</span> Unlimited peers</li>
+          <li><span class="check green">&check;</span> Unlimited messages</li>
+          <li><span class="check green">&check;</span> 90-day message history</li>
+          <li><span class="check green">&check;</span> E2E pairwise encryption</li>
+          <li><span class="check green">&check;</span> Priority support</li>
+        </ul>
+        <a href="/admin/register" class="btn btn-primary btn-block">Upgrade to Pro</a>
+      </div>
     </div>
   </div>
 </section>
