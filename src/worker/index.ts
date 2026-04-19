@@ -3,7 +3,7 @@ export type { Env } from './env.js';
 import type { Env } from './env.js';
 import { handleAuth } from './auth.js';
 import { handleApi } from './api.js';
-import { handleAdmin } from './pages.js';
+import { landingPage, handleAdmin } from './pages.js';
 import { jsonResponse } from './middleware.js';
 
 // ---------------------------------------------------------------------------
@@ -45,8 +45,15 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // Landing page
+    if (path === '/') {
+      return new Response(landingPage(), {
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
+
     // Health check
-    if (path === '/' || path === '/health') {
+    if (path === '/health') {
       return new Response(JSON.stringify({ status: 'ok', service: 'claude-bridge' }), {
         headers: { 'Content-Type': 'application/json' },
       });

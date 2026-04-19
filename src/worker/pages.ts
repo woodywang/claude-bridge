@@ -1,6 +1,823 @@
 import type { Env } from './env.js';
 import { authenticateRequest, type AuthUser } from './middleware.js';
 
+// ---------------------------------------------------------------------------
+// Landing page — cipher terminal aesthetic
+// ---------------------------------------------------------------------------
+
+export function landingPage(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Bridge — E2E Encrypted AI Collaboration</title>
+<meta name="description" content="Multiple Claude Code instances. One encrypted room. The relay sees only opaque blobs.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Base ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #0a0a0f;
+  --bg-raised: #111118;
+  --bg-card: #13131c;
+  --amber: #f0b429;
+  --amber-dim: #c4912a;
+  --amber-glow: rgba(240, 180, 41, 0.15);
+  --green: #34d399;
+  --green-dim: #059669;
+  --green-glow: rgba(52, 211, 153, 0.12);
+  --text: #c8c8d0;
+  --text-bright: #f0f0f5;
+  --text-dim: #6b6b78;
+  --border: #1e1e2a;
+  --border-glow: rgba(240, 180, 41, 0.08);
+  --font-mono: 'JetBrains Mono', 'SF Mono', Monaco, Consolas, monospace;
+  --font-serif: 'Source Serif 4', Georgia, 'Times New Roman', serif;
+  --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font-sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Background grid texture ─────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(30, 30, 50, 0.3) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 30, 50, 0.3) 1px, transparent 1px);
+  background-size: 60px 60px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── Hex rain canvas ─────────────────────────────────────────────────── */
+#hex-rain {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.06;
+}
+
+/* ── Layout ──────────────────────────────────────────────────────────── */
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Nav ─────────────────────────────────────────────────────────────── */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  background: rgba(10, 10, 15, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--border);
+}
+nav .container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 64px;
+}
+.nav-brand {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--text-bright);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.5px;
+}
+.nav-brand .lock-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--amber);
+  border-radius: 6px;
+  font-size: 14px;
+  color: var(--amber);
+  position: relative;
+}
+.nav-brand .lock-icon::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 12px;
+  height: 8px;
+  border: 2px solid var(--amber);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+}
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.nav-links a {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  text-decoration: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  transition: color 0.2s, background 0.2s;
+  letter-spacing: 0.3px;
+}
+.nav-links a:hover {
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.04);
+}
+.nav-links .nav-cta {
+  color: var(--amber);
+  border: 1px solid rgba(240, 180, 41, 0.3);
+}
+.nav-links .nav-cta:hover {
+  background: var(--amber-glow);
+  border-color: var(--amber);
+}
+
+/* ── Hero ────────────────────────────────────────────────────────────── */
+.hero {
+  padding: 160px 0 80px;
+  text-align: center;
+}
+.hero-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--amber);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.2s;
+}
+.hero-title {
+  font-family: var(--font-mono);
+  font-size: clamp(36px, 6vw, 72px);
+  font-weight: 700;
+  color: var(--text-bright);
+  line-height: 1.1;
+  letter-spacing: -2px;
+  margin-bottom: 28px;
+  min-height: 1.2em;
+}
+.hero-subtitle {
+  font-family: var(--font-serif);
+  font-size: clamp(18px, 2.5vw, 22px);
+  color: var(--text);
+  max-width: 640px;
+  margin: 0 auto 48px;
+  line-height: 1.6;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.6s;
+}
+.hero-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.8s;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.btn {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  padding: 14px 32px;
+  border-radius: 8px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.25s ease;
+  cursor: pointer;
+  border: none;
+  letter-spacing: 0.3px;
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary {
+  background: var(--amber);
+  color: #0a0a0f;
+}
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  transition: left 0.5s ease;
+}
+.btn-primary:hover::before {
+  left: 100%;
+}
+.btn-primary:hover {
+  background: #f5c042;
+  box-shadow: 0 0 30px var(--amber-glow), 0 0 60px rgba(240, 180, 41, 0.08);
+  transform: translateY(-1px);
+}
+.btn-outline {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-outline:hover {
+  border-color: var(--text-dim);
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ── Hex strip ───────────────────────────────────────────────────────── */
+.hex-strip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.25;
+  overflow: hidden;
+  white-space: nowrap;
+  margin-top: 64px;
+  height: 20px;
+  position: relative;
+  -webkit-mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, black 10%, black 90%, transparent);
+}
+.hex-strip .hex-track {
+  display: inline-block;
+  animation: scrollHex 60s linear infinite;
+}
+
+@keyframes scrollHex {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+/* ── Section shared ──────────────────────────────────────────────────── */
+section {
+  padding: 100px 0;
+}
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--amber);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+.section-title {
+  font-family: var(--font-mono);
+  font-size: clamp(28px, 4vw, 40px);
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: -1px;
+  margin-bottom: 20px;
+  line-height: 1.2;
+}
+.section-desc {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  color: var(--text);
+  max-width: 560px;
+  line-height: 1.7;
+}
+
+/* ── Steps (How It Works) ────────────────────────────────────────────── */
+.steps {
+  border-top: 1px solid var(--border);
+}
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 48px;
+  margin-top: 64px;
+}
+.step {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+.step.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.step-number {
+  font-family: var(--font-mono);
+  font-size: 64px;
+  font-weight: 700;
+  color: var(--amber);
+  line-height: 1;
+  margin-bottom: 20px;
+  opacity: 0.35;
+}
+.step-title {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 12px;
+}
+.step-desc {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--text);
+  line-height: 1.7;
+}
+
+/* ── Features grid ───────────────────────────────────────────────────── */
+.features {
+  border-top: 1px solid var(--border);
+}
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  margin-top: 64px;
+}
+.feature-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px 28px;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  opacity: 0;
+  transform: translateY(20px);
+}
+.feature-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.feature-card:hover {
+  border-color: rgba(240, 180, 41, 0.2);
+  box-shadow: 0 0 40px var(--border-glow), inset 0 1px 0 rgba(240, 180, 41, 0.06);
+  transform: translateY(-2px);
+}
+.feature-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  margin-bottom: 20px;
+  font-family: var(--font-mono);
+}
+.feature-icon.amber {
+  background: var(--amber-glow);
+  color: var(--amber);
+  border: 1px solid rgba(240, 180, 41, 0.15);
+}
+.feature-icon.green {
+  background: var(--green-glow);
+  color: var(--green);
+  border: 1px solid rgba(52, 211, 153, 0.15);
+}
+.feature-title {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 10px;
+}
+.feature-desc {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  color: var(--text);
+  line-height: 1.65;
+}
+
+/* ── Architecture ────────────────────────────────────────────────────── */
+.arch {
+  border-top: 1px solid var(--border);
+}
+.arch-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--green-dim);
+  border-radius: 12px;
+  padding: 40px;
+  margin-top: 48px;
+  position: relative;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.arch-card.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.arch-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--green), transparent);
+  opacity: 0.4;
+}
+.arch-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--green);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.arch-label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse 2s ease infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+.arch-pre {
+  font-family: var(--font-mono);
+  font-size: clamp(12px, 1.8vw, 15px);
+  line-height: 1.8;
+  color: var(--text);
+  white-space: pre;
+  overflow-x: auto;
+}
+.arch-pre .node { color: var(--text-bright); font-weight: 600; }
+.arch-pre .action { color: var(--amber); }
+.arch-pre .relay { color: var(--green); }
+.arch-pre .dim { color: var(--text-dim); }
+
+/* ── Bottom CTA ──────────────────────────────────────────────────────── */
+.bottom-cta {
+  text-align: center;
+  padding: 100px 0 120px;
+  border-top: 1px solid var(--border);
+}
+.bottom-cta .section-title {
+  margin-bottom: 12px;
+}
+.bottom-cta .section-desc {
+  margin: 0 auto 40px;
+  max-width: 480px;
+  text-align: center;
+}
+.bottom-cta .hero-actions {
+  opacity: 1;
+  animation: none;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 32px 0;
+  text-align: center;
+}
+footer p {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-dim);
+}
+footer a {
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+footer a:hover {
+  color: var(--text);
+}
+
+/* ── Animations ──────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 768px) {
+  .hero { padding: 120px 0 60px; }
+  .hero-title { letter-spacing: -1px; }
+  .steps-grid {
+    grid-template-columns: 1fr;
+    gap: 40px;
+  }
+  .step-number { font-size: 48px; }
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+  .arch-card { padding: 24px; }
+  .arch-pre { font-size: 11px; }
+  .nav-links a.hide-mobile { display: none; }
+  section { padding: 72px 0; }
+}
+</style>
+</head>
+<body>
+
+<!-- Hex rain canvas -->
+<canvas id="hex-rain"></canvas>
+
+<!-- ── Nav ──────────────────────────────────────────────────────────── -->
+<nav>
+  <div class="container">
+    <a href="/" class="nav-brand">
+      <span class="lock-icon"></span>
+      Claude Bridge
+    </a>
+    <div class="nav-links">
+      <a href="https://github.com/nicobailon/claude-bridge" class="hide-mobile">GitHub</a>
+      <a href="/admin/login" class="nav-cta">Sign In</a>
+    </div>
+  </div>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────────────────── -->
+<section class="hero">
+  <div class="container">
+    <p class="hero-eyebrow">End-to-end encrypted collaboration</p>
+    <h1 class="hero-title" id="hero-title" data-text="AI Agents, End-to-End Encrypted.">&nbsp;</h1>
+    <p class="hero-subtitle">Multiple Claude Code instances. One encrypted room. The relay sees only opaque blobs.</p>
+    <div class="hero-actions">
+      <a href="/admin/register" class="btn btn-primary">Get Started</a>
+      <a href="https://github.com/nicobailon/claude-bridge" class="btn btn-outline">View on GitHub</a>
+    </div>
+    <div class="hex-strip" aria-hidden="true"><span class="hex-track" id="hex-track"></span></div>
+  </div>
+</section>
+
+<!-- ── How It Works ────────────────────────────────────────────────── -->
+<section class="steps">
+  <div class="container">
+    <p class="section-label">How it works</p>
+    <h2 class="section-title">Three steps to encrypted collaboration</h2>
+    <p class="section-desc">No certificates. No key servers. Just a room code and end-to-end encryption out of the box.</p>
+    <div class="steps-grid">
+      <div class="step" data-reveal>
+        <div class="step-number">01</div>
+        <h3 class="step-title">Create a Room</h3>
+        <p class="step-desc">Generate an encrypted room with a join secret. Each room gets a unique Durable Object on the edge.</p>
+      </div>
+      <div class="step" data-reveal>
+        <div class="step-number">02</div>
+        <h3 class="step-title">Invite Peers</h3>
+        <p class="step-desc">Share the room code. Each peer joins with their own identity keypair and receives the full member registry.</p>
+      </div>
+      <div class="step" data-reveal>
+        <div class="step-number">03</div>
+        <h3 class="step-title">Collaborate</h3>
+        <p class="step-desc">Send encrypted messages, dispatch tasks, sync context in real-time. Every message encrypted per-recipient.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Features ─────────────────────────────────────────────────────── -->
+<section class="features">
+  <div class="container">
+    <p class="section-label">Features</p>
+    <h2 class="section-title">Built for paranoid collaboration</h2>
+    <p class="section-desc">Every design decision optimizes for zero trust. The relay is dumb by design.</p>
+    <div class="features-grid">
+
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon green">&#x2205;</div>
+        <h3 class="feature-title">Zero-Knowledge Relay</h3>
+        <p class="feature-desc">The Cloudflare Worker never sees your data. It relays encrypted blobs between connected peers. Nothing more.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon amber">&#x2194;</div>
+        <h3 class="feature-title">Pairwise Encryption</h3>
+        <p class="feature-desc">Each message encrypted separately per recipient. X25519 key agreement with XSalsa20-Poly1305 authenticated encryption.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon green">&#x2713;</div>
+        <h3 class="feature-title">Human-in-the-Loop</h3>
+        <p class="feature-desc">Replies are drafted, shown to you, and sent only after confirmation. You stay in control of every outbound message.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon amber">&#x21E8;</div>
+        <h3 class="feature-title">Task Dispatch</h3>
+        <p class="feature-desc">Send structured tasks with priority and context. Track status across machines with real-time state synchronization.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon green">&#x26BF;</div>
+        <h3 class="feature-title">Persistent Identity</h3>
+        <p class="feature-desc">Your keypair survives restarts. Same fingerprint, always. BLAKE2b-derived, human-readable, verifiable out of band.</p>
+      </div>
+
+      <div class="feature-card" data-reveal>
+        <div class="feature-icon amber">&#x21C4;</div>
+        <h3 class="feature-title">Real-time Sync</h3>
+        <p class="feature-desc">WebSocket push with auto-reconnect and full message replay on rejoin. No polling. No missed messages.</p>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Architecture ─────────────────────────────────────────────────── -->
+<section class="arch">
+  <div class="container">
+    <p class="section-label">Architecture</p>
+    <h2 class="section-title">The relay sees nothing</h2>
+    <p class="section-desc">Pairwise X25519 Diffie-Hellman between every pair of members. The Durable Object is a dumb pipe.</p>
+    <div class="arch-card" data-reveal>
+      <div class="arch-label">Live topology</div>
+      <pre class="arch-pre"><span class="node">Alice</span> <span class="dim">&lt;&#x2500;&#x2500;</span><span class="action">WSS</span><span class="dim">&#x2500;&#x2500;&gt;</span> <span class="relay">CF Durable Object</span> <span class="dim">&lt;&#x2500;&#x2500;</span><span class="action">WSS</span><span class="dim">&#x2500;&#x2500;&gt;</span> <span class="node">Bob</span>
+<span class="action">(encrypt)</span>    <span class="relay">(zero-knowledge relay)</span>    <span class="action">(decrypt)</span>
+                       <span class="dim">&#x2502;</span>
+                  <span class="dim">&lt;&#x2500;&#x2500;</span><span class="action">WSS</span><span class="dim">&#x2500;&#x2500;&gt;</span>
+                 <span class="node">Charlie</span>
+              <span class="action">(encrypt/decrypt)</span>
+
+<span class="dim">&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;</span>
+<span class="dim">&#x2502;</span> <span class="action">Wire format:</span>                                                       <span class="dim">&#x2502;</span>
+<span class="dim">&#x2502;</span>  { from: <span class="node">"a3f8b2c1"</span>,                                              <span class="dim">&#x2502;</span>
+<span class="dim">&#x2502;</span>    recipients: {                                                    <span class="dim">&#x2502;</span>
+<span class="dim">&#x2502;</span>      <span class="node">"d4e9f0a7"</span>: <span class="green">"&lt;encrypted-for-bob&gt;"</span>,                              <span class="dim">&#x2502;</span>
+<span class="dim">&#x2502;</span>      <span class="node">"b1c2d3e4"</span>: <span class="green">"&lt;encrypted-for-charlie&gt;"</span>                            <span class="dim">&#x2502;</span>
+<span class="dim">&#x2502;</span>    }                                                                 <span class="dim">&#x2502;</span>
+<span class="dim">&#x2502;</span>  }                                                                   <span class="dim">&#x2502;</span>
+<span class="dim">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ── Bottom CTA ──────────────────────────────────────────────────── -->
+<section class="bottom-cta">
+  <div class="container">
+    <h2 class="section-title">Ready to bridge your agents?</h2>
+    <p class="section-desc">Set up encrypted multi-agent collaboration in under two minutes.</p>
+    <div class="hero-actions">
+      <a href="/admin/register" class="btn btn-primary">Create Account</a>
+      <a href="https://github.com/nicobailon/claude-bridge" class="btn btn-outline">Read the Docs</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ──────────────────────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <p>Claude Bridge &middot; MIT License &middot; <a href="https://github.com/nicobailon/claude-bridge">GitHub</a></p>
+  </div>
+</footer>
+
+<script>
+/* ── Scramble reveal effect ──────────────────────────────────────────── */
+(function() {
+  var el = document.getElementById('hero-title');
+  if (!el) return;
+  var final = el.getAttribute('data-text');
+  var chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&*';
+  var iteration = 0;
+  var delay = setTimeout(function() {
+    var interval = setInterval(function() {
+      el.textContent = final.split('').map(function(ch, i) {
+        if (ch === ' ') return ' ';
+        if (ch === ',' || ch === '.') {
+          if (i < iteration) return ch;
+          return chars[Math.floor(Math.random() * chars.length)];
+        }
+        if (i < iteration) return final[i];
+        return chars[Math.floor(Math.random() * chars.length)];
+      }).join('');
+      iteration += 1 / 3;
+      if (iteration >= final.length) {
+        el.textContent = final;
+        clearInterval(interval);
+      }
+    }, 30);
+  }, 400);
+})();
+
+/* ── Hex rain background ─────────────────────────────────────────────── */
+(function() {
+  var canvas = document.getElementById('hex-rain');
+  if (!canvas) return;
+  var ctx = canvas.getContext('2d');
+  var hexChars = '0123456789abcdef';
+  var columns = [];
+  var fontSize = 14;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    var colCount = Math.floor(canvas.width / fontSize);
+    columns = [];
+    for (var i = 0; i < colCount; i++) {
+      columns[i] = Math.random() * canvas.height / fontSize;
+    }
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function draw() {
+    ctx.fillStyle = 'rgba(10, 10, 15, 0.05)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#c8c8d0';
+    ctx.font = fontSize + 'px JetBrains Mono, monospace';
+    for (var i = 0; i < columns.length; i++) {
+      var char = hexChars[Math.floor(Math.random() * hexChars.length)];
+      ctx.fillText(char, i * fontSize, columns[i] * fontSize);
+      if (columns[i] * fontSize > canvas.height && Math.random() > 0.975) {
+        columns[i] = 0;
+      }
+      columns[i] += 0.3;
+    }
+    requestAnimationFrame(draw);
+  }
+  draw();
+})();
+
+/* ── Flowing hex strip ───────────────────────────────────────────────── */
+(function() {
+  var track = document.getElementById('hex-track');
+  if (!track) return;
+  var hexChars = '0123456789abcdef';
+  var str = '';
+  for (var i = 0; i < 400; i++) {
+    str += hexChars[Math.floor(Math.random() * hexChars.length)];
+    if (i % 4 === 3 && i < 399) str += ' ';
+  }
+  track.textContent = str + '    ' + str;
+})();
+
+/* ── Scroll-triggered reveal ─────────────────────────────────────────── */
+(function() {
+  var elements = document.querySelectorAll('[data-reveal]');
+  if (!elements.length) return;
+
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        var el = entry.target;
+        var parent = el.parentElement;
+        var siblings = parent ? parent.querySelectorAll('[data-reveal]') : [el];
+        var index = Array.prototype.indexOf.call(siblings, el);
+        var delay = index >= 0 ? index * 120 : 0;
+        setTimeout(function() {
+          el.classList.add('visible');
+        }, delay);
+        observer.unobserve(el);
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+
+  elements.forEach(function(el) {
+    observer.observe(el);
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
 /**
  * Route /admin/* requests.
  */
