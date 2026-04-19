@@ -472,18 +472,13 @@ section {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
 }
-.arch-pre {
-  font-family: var(--font-mono);
-  font-size: clamp(12px, 1.8vw, 15px);
-  line-height: 1.8;
-  color: var(--text);
-  white-space: pre;
-  overflow-x: auto;
+.topo-svg {
+  width: 100%;
+  max-width: 720px;
+  height: auto;
+  margin: 0 auto;
+  display: block;
 }
-.arch-pre .node { color: var(--text-bright); font-weight: 600; }
-.arch-pre .action { color: var(--amber); }
-.arch-pre .relay { color: var(--green); }
-.arch-pre .dim { color: var(--text-dim); }
 
 /* ── Pricing ─────────────────────────────────────────────────────────── */
 .pricing {
@@ -761,22 +756,79 @@ footer a:hover {
     <p class="section-desc">Pairwise X25519 Diffie-Hellman between every pair of members. The Durable Object is a dumb pipe.</p>
     <div class="arch-card" data-reveal>
       <div class="arch-label">Live topology</div>
-      <pre class="arch-pre"><span class="node">Alice</span> <span class="dim">&lt;&#x2500;&#x2500;</span><span class="action">WSS</span><span class="dim">&#x2500;&#x2500;&gt;</span> <span class="relay">CF Durable Object</span> <span class="dim">&lt;&#x2500;&#x2500;</span><span class="action">WSS</span><span class="dim">&#x2500;&#x2500;&gt;</span> <span class="node">Bob</span>
-<span class="action">(encrypt)</span>    <span class="relay">(zero-knowledge relay)</span>    <span class="action">(decrypt)</span>
-                       <span class="dim">&#x2502;</span>
-                  <span class="dim">&lt;&#x2500;&#x2500;</span><span class="action">WSS</span><span class="dim">&#x2500;&#x2500;&gt;</span>
-                 <span class="node">Charlie</span>
-              <span class="action">(encrypt/decrypt)</span>
+      <svg class="topo-svg" viewBox="0 0 720 340" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- Animated data packet -->
+          <circle id="packet" r="3" fill="#f0b429" opacity="0.9">
+            <animate attributeName="opacity" values="0.9;0.4;0.9" dur="1.5s" repeatCount="indefinite"/>
+          </circle>
+          <!-- Glow filter -->
+          <filter id="glow">
+            <feGaussianBlur stdDeviation="3" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <filter id="glow-green">
+            <feGaussianBlur stdDeviation="4" result="blur"/>
+            <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
 
-<span class="dim">&#x250C;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2510;</span>
-<span class="dim">&#x2502;</span> <span class="action">Wire format:</span>                                                       <span class="dim">&#x2502;</span>
-<span class="dim">&#x2502;</span>  { from: <span class="node">"a3f8b2c1"</span>,                                              <span class="dim">&#x2502;</span>
-<span class="dim">&#x2502;</span>    recipients: {                                                    <span class="dim">&#x2502;</span>
-<span class="dim">&#x2502;</span>      <span class="node">"d4e9f0a7"</span>: <span class="green">"&lt;encrypted-for-bob&gt;"</span>,                              <span class="dim">&#x2502;</span>
-<span class="dim">&#x2502;</span>      <span class="node">"b1c2d3e4"</span>: <span class="green">"&lt;encrypted-for-charlie&gt;"</span>                            <span class="dim">&#x2502;</span>
-<span class="dim">&#x2502;</span>    }                                                                 <span class="dim">&#x2502;</span>
-<span class="dim">&#x2502;</span>  }                                                                   <span class="dim">&#x2502;</span>
-<span class="dim">&#x2514;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2518;</span></pre>
+        <!-- Connection lines -->
+        <line x1="165" y1="100" x2="325" y2="170" stroke="#f0b429" stroke-width="1" opacity="0.3" stroke-dasharray="6,4">
+          <animate attributeName="stroke-dashoffset" from="0" to="-20" dur="2s" repeatCount="indefinite"/>
+        </line>
+        <line x1="555" y1="100" x2="395" y2="170" stroke="#f0b429" stroke-width="1" opacity="0.3" stroke-dasharray="6,4">
+          <animate attributeName="stroke-dashoffset" from="0" to="-20" dur="2s" repeatCount="indefinite"/>
+        </line>
+        <line x1="360" y1="200" x2="360" y2="280" stroke="#f0b429" stroke-width="1" opacity="0.3" stroke-dasharray="6,4">
+          <animate attributeName="stroke-dashoffset" from="0" to="-20" dur="2s" repeatCount="indefinite"/>
+        </line>
+
+        <!-- Animated packets on lines -->
+        <circle r="3" fill="#f0b429" filter="url(#glow)">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M165,100 L325,170"/>
+        </circle>
+        <circle r="3" fill="#f0b429" filter="url(#glow)">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M325,170 L165,100" begin="1.2s"/>
+        </circle>
+        <circle r="3" fill="#f0b429" filter="url(#glow)">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M555,100 L395,170" begin="0.4s"/>
+        </circle>
+        <circle r="3" fill="#f0b429" filter="url(#glow)">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M395,170 L555,100" begin="1.8s"/>
+        </circle>
+        <circle r="3" fill="#f0b429" filter="url(#glow)">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M360,200 L360,280" begin="0.7s"/>
+        </circle>
+        <circle r="3" fill="#f0b429" filter="url(#glow)">
+          <animateMotion dur="2.5s" repeatCount="indefinite" path="M360,280 L360,200" begin="2s"/>
+        </circle>
+
+        <!-- Alice node -->
+        <rect x="60" y="60" width="210" height="80" rx="8" fill="none" stroke="#c8c8d0" stroke-width="1" opacity="0.4"/>
+        <text x="165" y="92" text-anchor="middle" fill="#f0f0f5" font-family="JetBrains Mono, monospace" font-size="15" font-weight="600">Alice</text>
+        <text x="165" y="118" text-anchor="middle" fill="#f0b429" font-family="JetBrains Mono, monospace" font-size="11">encrypt &middot; fingerprint a3f8</text>
+
+        <!-- Bob node -->
+        <rect x="450" y="60" width="210" height="80" rx="8" fill="none" stroke="#c8c8d0" stroke-width="1" opacity="0.4"/>
+        <text x="555" y="92" text-anchor="middle" fill="#f0f0f5" font-family="JetBrains Mono, monospace" font-size="15" font-weight="600">Bob</text>
+        <text x="555" y="118" text-anchor="middle" fill="#f0b429" font-family="JetBrains Mono, monospace" font-size="11">decrypt &middot; fingerprint d4e9</text>
+
+        <!-- DO relay node (center) -->
+        <rect x="280" y="150" width="160" height="60" rx="8" fill="none" stroke="#34d399" stroke-width="1.5" filter="url(#glow-green)" opacity="0.7"/>
+        <text x="360" y="178" text-anchor="middle" fill="#34d399" font-family="JetBrains Mono, monospace" font-size="12" font-weight="600">CF Durable Object</text>
+        <text x="360" y="198" text-anchor="middle" fill="#555" font-family="JetBrains Mono, monospace" font-size="10">zero-knowledge relay</text>
+
+        <!-- Charlie node -->
+        <rect x="255" y="270" width="210" height="80" rx="8" fill="none" stroke="#c8c8d0" stroke-width="1" opacity="0.4"/>
+        <text x="360" y="302" text-anchor="middle" fill="#f0f0f5" font-family="JetBrains Mono, monospace" font-size="15" font-weight="600">Charlie</text>
+        <text x="360" y="328" text-anchor="middle" fill="#f0b429" font-family="JetBrains Mono, monospace" font-size="11">encrypt/decrypt &middot; fp b1c2</text>
+
+        <!-- WSS labels on lines -->
+        <text x="225" y="125" text-anchor="middle" fill="#f0b429" font-family="JetBrains Mono, monospace" font-size="10" opacity="0.7">WSS</text>
+        <text x="495" y="125" text-anchor="middle" fill="#f0b429" font-family="JetBrains Mono, monospace" font-size="10" opacity="0.7">WSS</text>
+        <text x="380" y="248" text-anchor="start" fill="#f0b429" font-family="JetBrains Mono, monospace" font-size="10" opacity="0.7">WSS</text>
+      </svg>
     </div>
   </div>
 </section>
