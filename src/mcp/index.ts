@@ -117,7 +117,9 @@ async function main(): Promise<void> {
   // -----------------------------------------------------------------------
   const wsProto = workerUrl.startsWith('https') ? 'wss' : 'ws';
   const wsHost = workerUrl.replace(/^https?:\/\//, '');
-  const wsUrl = `${wsProto}://${wsHost}/room/${roomCode}/ws`;
+  const joinSecret = process.env.BRIDGE_SECRET ?? '';
+  const secretParam = joinSecret ? `?secret=${encodeURIComponent(joinSecret)}` : '';
+  const wsUrl = `${wsProto}://${wsHost}/room/${roomCode}/ws${secretParam}`;
 
   const ws = new BridgeWebSocket(
     wsUrl,

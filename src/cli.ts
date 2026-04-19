@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
 import { dirname, resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -11,12 +11,77 @@ const __dirname = dirname(__filename);
 
 const DEFAULT_WORKER_URL = 'https://claude-bridge.workers.dev';
 
+function loadAuth(): { token: string; workerUrl: string } | null {
+  try {
+    const authPath = join(homedir(), '.claude-bridge', 'auth.json');
+    const data = JSON.parse(readFileSync(authPath, 'utf-8'));
+    return { token: data.token, workerUrl: data.workerUrl };
+  } catch {
+    return null;
+  }
+}
+
 const program = new Command();
 
 program
   .name('claude-bridge')
   .description('E2E encrypted cross-machine Claude Code collaboration tool')
   .version('0.1.0');
+
+// ---------------------------------------------------------------------------
+// login <token>
+// ---------------------------------------------------------------------------
+program
+  .command('login <token>')
+  .description('Authenticate with an API token from the web dashboard')
+  .option('--worker-url <url>', 'Worker URL', DEFAULT_WORKER_URL)
+  .action(async (token: string, opts: { workerUrl: string }) => {
+    // Validate token by calling the API
+    try {
+      const resp = await fetch(`${opts.workerUrl}/api/tokens`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!resp.ok) {
+        console.error('Invalid token. Get a new one from the web dashboard.');
+        process.exit(1);
+      }
+      const body = await resp.json() as { email: string; name: string };
+
+      // Save to ~/.claude-bridge/auth.json
+      const authDir = join(homedir(), '.claude-bridge');
+      if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
+      const authPath = join(authDir, 'auth.json');
+      writeFileSync(authPath, JSON.stringify({
+        token,
+        workerUrl: opts.workerUrl,
+        email: body.email,
+        name: body.name,
+        savedAt: Date.now(),
+      }, null, 2), { mode: 0o600 });
+
+      console.log(`Logged in as ${body.name} (${body.email})`);
+      console.log(`Token saved to ${authPath}`);
+    } catch (err) {
+      console.error(`Failed to validate token: ${(err as Error).message}`);
+      process.exit(1);
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// logout
+// ---------------------------------------------------------------------------
+program
+  .command('logout')
+  .description('Remove saved authentication')
+  .action(() => {
+    const authPath = join(homedir(), '.claude-bridge', 'auth.json');
+    if (existsSync(authPath)) {
+      unlinkSync(authPath);
+      console.log('Logged out. Token removed.');
+    } else {
+      console.log('Not logged in.');
+    }
+  });
 
 // ---------------------------------------------------------------------------
 // host
@@ -26,30 +91,44 @@ program
   .description('Create a new room and display connection instructions')
   .option('--worker-url <url>', 'Worker URL', DEFAULT_WORKER_URL)
   .action(async (opts: { workerUrl: string }) => {
-    const workerUrl = opts.workerUrl;
+    const auth = loadAuth();
+    const token = process.env.BRIDGE_TOKEN ?? auth?.token;
+    const workerUrl = auth?.workerUrl ?? opts.workerUrl;
+
+    if (!token) {
+      console.error('Not logged in. Get an API token from the web dashboard:');
+      console.error(`  1. Visit ${workerUrl}/admin/login`);
+      console.error('  2. Sign in with Google');
+      console.error('  3. Create an API token on the dashboard');
+      console.error('  4. Run: claude-bridge login <token>');
+      process.exit(1);
+    }
 
     console.log('Creating room...');
 
     try {
-      const resp = await fetch(`${workerUrl}/room/create`, { method: 'POST' });
+      const resp = await fetch(`${workerUrl}/api/room/create`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
       if (!resp.ok) {
         const text = await resp.text();
         console.error(`Failed to create room: ${resp.status} ${text}`);
         process.exit(1);
       }
-      const body = (await resp.json()) as { code: string };
-      const code = body.code;
+      const body = (await resp.json()) as { code: string; joinSecret: string };
 
       console.log('');
-      console.log(`Room created: ${code}`);
+      console.log(`Room created: ${body.code}`);
+      console.log(`Join secret: ${body.joinSecret}`);
       console.log('');
       console.log('To connect from this machine:');
-      console.log(`  claude-bridge mcp-install --role host --code ${code} --name <your-alias>`);
+      console.log(`  claude-bridge mcp-install --role host --code ${body.code} --secret ${body.joinSecret} --name <your-alias>`);
       console.log('');
-      console.log('To connect from the other machine:');
-      console.log(`  claude-bridge mcp-install --role peer --code ${code} --name <your-alias>`);
+      console.log('To connect from another machine:');
+      console.log(`  claude-bridge mcp-install --role peer --code ${body.code} --secret ${body.joinSecret} --name <your-alias>`);
       console.log('');
-      console.log('Then restart Claude Code on both machines.');
+      console.log('Then restart Claude Code on all machines.');
     } catch (err) {
       console.error(`Failed to connect to worker: ${(err as Error).message}`);
       process.exit(1);
@@ -74,7 +153,7 @@ program
     console.log(`Joining room: ${code}`);
     console.log('');
     console.log('Run:');
-    console.log(`  claude-bridge mcp-install --role peer --code ${code} --name <your-alias>`);
+    console.log(`  claude-bridge mcp-install --role peer --code ${code} --secret <join-secret> --name <your-alias>`);
     console.log('');
     console.log('Then restart Claude Code.');
   });
@@ -133,10 +212,11 @@ program
   )
   .requiredOption('--role <role>', 'Role: host or peer')
   .requiredOption('--code <code>', 'Room code (6-char uppercase alphanumeric)')
+  .requiredOption('--secret <secret>', 'Room join secret (from host command)')
   .requiredOption('--name <name>', 'Display name / alias for this instance')
   .option('--worker-url <url>', 'Worker URL', DEFAULT_WORKER_URL)
   .action(
-    (opts: { role: string; code: string; name: string; workerUrl: string }) => {
+    (opts: { role: string; code: string; secret: string; name: string; workerUrl: string }) => {
       // Validate role
       if (opts.role !== 'host' && opts.role !== 'peer') {
         console.error(
@@ -180,6 +260,7 @@ program
           BRIDGE_ROLE: opts.role,
           BRIDGE_CODE: opts.code,
           BRIDGE_NAME: opts.name,
+          BRIDGE_SECRET: opts.secret,
           BRIDGE_WORKER_URL: opts.workerUrl,
           BRIDGE_PROJECT_DIR: projectDir,
         },
