@@ -8,12 +8,6 @@ interface RoomRecord {
   createdAt: string;
 }
 
-interface TokenRecord {
-  tokenPrefix: string;
-  label: string;
-  createdAt: string;
-}
-
 /**
  * Route /api/* requests. All require authentication.
  */
@@ -31,19 +25,6 @@ export async function handleApi(request: Request, url: URL, env: Env): Promise<R
 
   if (path === '/api/rooms' && request.method === 'GET') {
     return handleRoomList(user, env);
-  }
-
-  if (path === '/api/tokens/create' && request.method === 'POST') {
-    return handleTokenCreate(request, user, env);
-  }
-
-  if (path === '/api/tokens' && request.method === 'GET') {
-    return handleTokenList(user, env);
-  }
-
-  const tokenDeleteMatch = path.match(/^\/api\/tokens\/([a-f0-9]{16})$/);
-  if (tokenDeleteMatch && request.method === 'DELETE') {
-    return handleTokenDelete(tokenDeleteMatch[1], user, env);
   }
 
   return null;
@@ -112,75 +93,4 @@ async function handleRoomList(user: AuthUser, env: Env): Promise<Response> {
   }
 
   return jsonResponse({ rooms });
-}
-
-// ---------------------------------------------------------------------------
-// Token management
-// ---------------------------------------------------------------------------
-
-async function handleTokenCreate(request: Request, user: AuthUser, env: Env): Promise<Response> {
-  let body: { label?: string };
-  try {
-    body = (await request.json()) as { label?: string };
-  } catch {
-    return jsonResponse({ error: 'Invalid JSON body' }, 400);
-  }
-
-  const label = body.label ?? 'Untitled';
-  const token = generateToken(32); // 64 hex chars
-  const tokenPrefix = token.slice(0, 16);
-
-  // Store the API token → user mapping (365-day TTL)
-  await env.SESSIONS.put(`apitoken:${token}`, JSON.stringify(user), {
-    expirationTtl: 365 * 24 * 60 * 60,
-  });
-
-  // Store reference for listing: usertoken:<userId>:<prefix> → full token
-  await env.SESSIONS.put(`usertoken:${user.userId}:${tokenPrefix}`, token, {
-    expirationTtl: 365 * 24 * 60 * 60,
-  });
-
-  // Append to user's token list
-  const tokenList = ((await env.SESSIONS.get(`user_tokens:${user.userId}`, 'json')) ?? []) as TokenRecord[];
-  tokenList.push({
-    tokenPrefix,
-    label,
-    createdAt: new Date().toISOString(),
-  });
-  await env.SESSIONS.put(`user_tokens:${user.userId}`, JSON.stringify(tokenList));
-
-  return jsonResponse({ token, label });
-}
-
-async function handleTokenList(user: AuthUser, env: Env): Promise<Response> {
-  const tokenList = ((await env.SESSIONS.get(`user_tokens:${user.userId}`, 'json')) ?? []) as TokenRecord[];
-
-  // Return label, createdAt, and last 4 chars (never full token)
-  const tokens = tokenList.map(t => ({
-    id: t.tokenPrefix,
-    label: t.label,
-    createdAt: t.createdAt,
-    last4: t.tokenPrefix.slice(-4),
-  }));
-
-  return jsonResponse({ email: user.email, name: user.name, tokens });
-}
-
-async function handleTokenDelete(prefix: string, user: AuthUser, env: Env): Promise<Response> {
-  // Look up the full token
-  const fullToken = await env.SESSIONS.get(`usertoken:${user.userId}:${prefix}`);
-  if (!fullToken) {
-    return jsonResponse({ error: 'Token not found' }, 404);
-  }
-
-  // Delete both KV keys
-  await env.SESSIONS.delete(`apitoken:${fullToken}`);
-  await env.SESSIONS.delete(`usertoken:${user.userId}:${prefix}`);
-
-  // Remove from user's token list
-  const tokenList = ((await env.SESSIONS.get(`user_tokens:${user.userId}`, 'json')) ?? []) as TokenRecord[];
-  const filtered = tokenList.filter(t => t.tokenPrefix !== prefix);
-  await env.SESSIONS.put(`user_tokens:${user.userId}`, JSON.stringify(filtered));
-
-  return jsonResponse({ ok: true });
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { dirname, resolve, join } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -123,59 +123,6 @@ program
   .name('claude-bridge')
   .description('E2E encrypted cross-machine Claude Code collaboration tool')
   .version('0.1.0');
-
-// ---------------------------------------------------------------------------
-// login <token>
-// ---------------------------------------------------------------------------
-program
-  .command('login <token>')
-  .description('Authenticate with an API token from the web dashboard')
-  .option('--worker-url <url>', 'Worker URL', DEFAULT_WORKER_URL)
-  .action(async (token: string, opts: { workerUrl: string }) => {
-    try {
-      const resp = await fetch(`${opts.workerUrl}/api/tokens`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (!resp.ok) {
-        console.error('Invalid token. Get a new one from the web dashboard.');
-        process.exit(1);
-      }
-      const body = await resp.json() as { email: string; name: string };
-
-      const authDir = join(homedir(), '.claude-bridge');
-      if (!existsSync(authDir)) mkdirSync(authDir, { recursive: true });
-      const authPath = join(authDir, 'auth.json');
-      writeFileSync(authPath, JSON.stringify({
-        token,
-        workerUrl: opts.workerUrl,
-        email: body.email,
-        name: body.name,
-        savedAt: Date.now(),
-      }, null, 2), { mode: 0o600 });
-
-      console.log(`Logged in as ${body.name} (${body.email})`);
-      console.log(`Token saved to ${authPath}`);
-    } catch (err) {
-      console.error(`Failed to validate token: ${(err as Error).message}`);
-      process.exit(1);
-    }
-  });
-
-// ---------------------------------------------------------------------------
-// logout
-// ---------------------------------------------------------------------------
-program
-  .command('logout')
-  .description('Remove saved authentication')
-  .action(() => {
-    const authPath = join(homedir(), '.claude-bridge', 'auth.json');
-    if (existsSync(authPath)) {
-      unlinkSync(authPath);
-      console.log('Logged out. Token removed.');
-    } else {
-      console.log('Not logged in.');
-    }
-  });
 
 // ---------------------------------------------------------------------------
 // host <code> — room creator installs MCP on their machine

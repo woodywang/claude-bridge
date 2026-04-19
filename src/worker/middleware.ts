@@ -8,18 +8,9 @@ export interface AuthUser {
 }
 
 /**
- * Extract user from session cookie or bearer token.
+ * Extract user from session cookie.
  */
 export async function authenticateRequest(request: Request, env: Env): Promise<AuthUser | null> {
-  // Try bearer token first (API calls from CLI)
-  const authHeader = request.headers.get('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    const data = await env.SESSIONS.get(`apitoken:${token}`, 'json');
-    if (data) return data as AuthUser;
-  }
-
-  // Try session cookie (web browser)
   const cookie = request.headers.get('Cookie') ?? '';
   const match = cookie.match(/(?:^|;\s*)__bridge_session=([a-f0-9]+)/);
   if (match) {

@@ -1390,17 +1390,6 @@ ${FAVICON}
   <div id="rooms-list"><p class="empty">Loading...</p></div>
 </section>
 
-<!-- API Tokens -->
-<section>
-  <h2>API Tokens</h2>
-  <div class="row" style="margin-bottom: 12px;">
-    <input type="text" id="token-label" placeholder="Token label (e.g. laptop)">
-    <button class="btn" onclick="createToken()">Create Token</button>
-  </div>
-  <div id="token-result" class="result-box"></div>
-  <div id="tokens-list"><p class="empty">Loading...</p></div>
-</section>
-
 <!-- CLI Quick Start -->
 <section>
   <h2>CLI Quick Start</h2>
@@ -1455,51 +1444,6 @@ async function loadRooms() {
   el.innerHTML = html;
 }
 
-async function createToken() {
-  const label = document.getElementById('token-label').value.trim() || 'Untitled';
-  const res = await fetch('/api/tokens/create', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label }),
-  });
-  if (!res.ok) { alert('Failed to create token'); return; }
-  const data = await res.json();
-  const el = document.getElementById('token-result');
-  el.classList.add('visible');
-  el.innerHTML = '<strong>Token created!</strong> Copy it now (you will not see it again):<br>' +
-    '<code>' + esc(data.token) + '</code>';
-  document.getElementById('token-label').value = '';
-  loadTokens();
-}
-
-async function loadTokens() {
-  const res = await fetch('/api/tokens');
-  if (!res.ok) return;
-  const data = await res.json();
-  const el = document.getElementById('tokens-list');
-  if (!data.tokens.length) {
-    el.innerHTML = '<p class="empty">No API tokens yet.</p>';
-    return;
-  }
-  let html = '<table><thead><tr><th>Label</th><th>Token</th><th>Created</th><th></th></tr></thead><tbody>';
-  for (const t of data.tokens) {
-    const date = new Date(t.createdAt).toLocaleDateString();
-    html += '<tr><td>' + esc(t.label) + '</td>' +
-      '<td class="secret-value">...' + esc(t.last4) + '</td>' +
-      '<td>' + esc(date) + '</td>' +
-      '<td><button class="btn btn-danger btn-sm" onclick="deleteToken(&quot;' + esc(t.id) + '&quot;)">Delete</button></td></tr>';
-  }
-  html += '</tbody></table>';
-  el.innerHTML = html;
-}
-
-async function deleteToken(id) {
-  if (!confirm('Delete this token? This cannot be undone.')) return;
-  const res = await fetch('/api/tokens/' + id, { method: 'DELETE' });
-  if (!res.ok) { alert('Failed to delete token'); return; }
-  loadTokens();
-}
-
 function toggleSecret(el) {
   const span = el.previousElementSibling;
   const secret = span.getAttribute('data-secret');
@@ -1529,7 +1473,6 @@ function esc(s) {
 
 // Load on page init
 loadRooms();
-loadTokens();
 </script>
 </body>
 </html>`;
