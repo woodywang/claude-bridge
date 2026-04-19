@@ -13,7 +13,17 @@ export async function handleAdmin(request: Request, url: URL, env: Env): Promise
     if (user) {
       return Response.redirect(`${env.ADMIN_ORIGIN}/admin/dashboard`, 302);
     }
-    return htmlResponse(loginPage());
+    const error = url.searchParams.get('error');
+    return htmlResponse(loginPage(error));
+  }
+
+  if (path === '/admin/register' && request.method === 'GET') {
+    const user = await authenticateRequest(request, env);
+    if (user) {
+      return Response.redirect(`${env.ADMIN_ORIGIN}/admin/dashboard`, 302);
+    }
+    const error = url.searchParams.get('error');
+    return htmlResponse(registerPage(error));
   }
 
   if (path === '/admin/dashboard' && request.method === 'GET') {
@@ -37,7 +47,8 @@ function htmlResponse(body: string): Response {
 // Login page
 // ---------------------------------------------------------------------------
 
-function loginPage(): string {
+function loginPage(error: string | null): string {
+  const errorHtml = error ? `<p class="error">${escapeHtml(error)}</p>` : '';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -83,16 +94,154 @@ function loginPage(): string {
   }
   .btn-google:hover { background: #f7f8f8; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
   .btn-google svg { width: 20px; height: 20px; }
+  .divider { display: flex; align-items: center; gap: 16px; margin: 24px 0; color: #999; font-size: 13px; }
+  .divider::before, .divider::after { content: ''; flex: 1; border-top: 1px solid #e5e5e5; }
+  .form-group { margin-bottom: 14px; text-align: left; }
+  .form-group label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 4px; }
+  .form-group input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .form-group input:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.15); }
+  .btn-submit {
+    width: 100%;
+    padding: 10px;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 4px;
+  }
+  .btn-submit:hover { background: #1557b0; }
+  .error { color: #d93025; font-size: 13px; margin-bottom: 16px; background: #fce8e6; padding: 8px 12px; border-radius: 6px; }
+  .link { color: #1a73e8; text-decoration: none; font-size: 13px; }
+  .link:hover { text-decoration: underline; }
+  .footer { margin-top: 20px; }
 </style>
 </head>
 <body>
 <div class="card">
   <h1>Claude Bridge</h1>
   <p class="subtitle">E2E encrypted multi-party collaboration</p>
+  ${errorHtml}
   <a href="/auth/google" class="btn-google">
     <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
     Sign in with Google
   </a>
+  <div class="divider">or</div>
+  <form method="POST" action="/auth/login">
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required autocomplete="username">
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn-submit">Sign in</button>
+  </form>
+  <div class="footer">
+    <a href="/admin/register" class="link">Don't have an account? Register</a>
+  </div>
+</div>
+</body>
+</html>`;
+}
+
+// ---------------------------------------------------------------------------
+// Register page
+// ---------------------------------------------------------------------------
+
+function registerPage(error: string | null): string {
+  const errorHtml = error ? `<p class="error">${escapeHtml(error)}</p>` : '';
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Bridge - Register</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f5f5;
+    color: #1a1a1a;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    padding: 48px 40px;
+    max-width: 400px;
+    width: 100%;
+  }
+  h1 { font-size: 24px; font-weight: 600; margin-bottom: 8px; text-align: center; }
+  .subtitle { color: #666; font-size: 14px; margin-bottom: 24px; text-align: center; }
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 13px; font-weight: 500; color: #555; margin-bottom: 4px; }
+  .form-group input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #dadce0;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+  .form-group input:focus { outline: none; border-color: #1a73e8; box-shadow: 0 0 0 2px rgba(26,115,232,0.15); }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  .btn-submit {
+    width: 100%;
+    padding: 10px;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 8px;
+  }
+  .btn-submit:hover { background: #1557b0; }
+  .error { color: #d93025; font-size: 13px; margin-bottom: 16px; background: #fce8e6; padding: 8px 12px; border-radius: 6px; }
+  .link { color: #1a73e8; text-decoration: none; font-size: 13px; }
+  .link:hover { text-decoration: underline; }
+  .footer { margin-top: 20px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Create Account</h1>
+  <p class="subtitle">Register for Claude Bridge</p>
+  ${errorHtml}
+  <form method="POST" action="/auth/register">
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input type="text" id="username" name="username" required minlength="3" maxlength="30" pattern="[a-zA-Z0-9_-]+" autocomplete="username">
+      <p class="hint">3-30 characters, letters, numbers, _ and -</p>
+    </div>
+    <div class="form-group">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" required minlength="6" autocomplete="new-password">
+      <p class="hint">At least 6 characters</p>
+    </div>
+    <div class="form-group">
+      <label for="confirm">Confirm Password</label>
+      <input type="password" id="confirm" name="confirm" required minlength="6" autocomplete="new-password">
+    </div>
+    <button type="submit" class="btn-submit">Create Account</button>
+  </form>
+  <div class="footer">
+    <a href="/admin/login" class="link">Already have an account? Sign in</a>
+  </div>
 </div>
 </body>
 </html>`;
@@ -323,7 +472,7 @@ async function loadTokens() {
     html += '<tr><td>' + esc(t.label) + '</td>' +
       '<td class="secret-value">...' + esc(t.last4) + '</td>' +
       '<td>' + esc(date) + '</td>' +
-      '<td><button class="btn btn-danger btn-sm" onclick="deleteToken(\'' + esc(t.id) + '\')">Delete</button></td></tr>';
+      '<td><button class="btn btn-danger btn-sm" onclick="deleteToken(&quot;' + esc(t.id) + '&quot;)">Delete</button></td></tr>';
   }
   html += '</tbody></table>';
   el.innerHTML = html;
