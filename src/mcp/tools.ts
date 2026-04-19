@@ -531,6 +531,10 @@ export function registerTools(server: McpServer, state: BridgeState): void {
           }
         }
 
+        // Auto mark the original message as read after successful reply
+        original.read = true;
+        state.syncCounts();
+
         const result = `Reply sent to ${sentTo.join(', ')}` +
           (ccSentTo.length > 0 ? `. CC sent to ${ccSentTo.join(', ')}` : '');
         return textResult(result);

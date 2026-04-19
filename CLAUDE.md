@@ -9,15 +9,16 @@ E2E encrypted multi-party Claude Code collaboration. N instances on different ma
 ## Architecture
 
 ```
-Browser → [Google OAuth] → Session → Web Admin (create room, manage tokens)
-CLI     → [API Token]    → Bearer  → POST /api/room/create
+Browser → [Google OAuth] → Session → Web Admin (create room, manage tokens, billing)
                                         ↓
 Claude A ←stdio→ MCP Server ←WSS→ CF Worker (auth) → DO (relay) ←WSS→ MCP Server ←stdio→ Claude B
                  (encrypt)         (join secret      (member registry,   (decrypt)
                                     validation)       message log, zero-knowledge)
 ```
 
-- **Worker auth layer**: Google OAuth login, KV-backed sessions, API tokens for CLI. Room creation requires authentication. WebSocket join requires room join secret.
+- **Room creation is web-only**: Google OAuth login → web dashboard. Rooms are created exclusively through the web UI for permission management and billing enforcement.
+- **CLI is install-only**: `host`/`join` commands install MCP config locally. No room creation from CLI.
+- **Worker auth layer**: Google OAuth login, KV-backed sessions. WebSocket join requires room join secret.
 - **DO maintains member registry**: fingerprint, publicKey, name, online status. DO is zero-knowledge — no auth info.
 - **MCP Server (single process)**: stdio for Claude Code + WebSocket to DO. Computes pairwise shared secrets on connect.
 - **Pairwise encryption**: each message encrypted separately per recipient (X25519 DH + XSalsa20-Poly1305). Wire format: `{from: fingerprint, recipients: {fp: blob, ...}}`.

@@ -1394,14 +1394,13 @@ function dashboardPage(user: AuthUser): string {
 <!-- CLI Quick Start -->
 <section>
   <h2>CLI Quick Start</h2>
-  <pre class="cli"># Login with your API token
-claude-bridge login &lt;your-token&gt;
+  <pre class="cli"># On your machine (room creator)
+claude-bridge host &lt;CODE&gt; --secret &lt;SECRET&gt; --name &lt;your-alias&gt;
 
-# Host a room (creates room + installs MCP server)
-claude-bridge host
+# On peer machines (share code + secret with them)
+npx claude-bridge join &lt;CODE&gt; --secret &lt;SECRET&gt; --name &lt;their-alias&gt;
 
-# Join with room code and secret
-claude-bridge mcp-install --role host --code &lt;CODE&gt; --secret &lt;SECRET&gt; --name &lt;NAME&gt;</pre>
+# Then restart Claude Code on all machines</pre>
 </section>
 
 </main>
@@ -1414,7 +1413,11 @@ async function createRoom() {
   const el = document.getElementById('room-result');
   el.classList.add('visible');
   el.innerHTML = '<strong>Room Code:</strong> ' + esc(data.code) +
-    '<br><strong>Join Secret:</strong> ' + esc(data.joinSecret);
+    '<br><strong>Join Secret:</strong> ' + esc(data.joinSecret) +
+    '<br><br><strong>Install on your machine:</strong>' +
+    '<pre class="cli" style="margin-top:8px">claude-bridge host ' + esc(data.code) + ' --secret ' + esc(data.joinSecret) + ' --name &lt;your-alias&gt;</pre>' +
+    '<strong>Share with peers:</strong>' +
+    '<pre class="cli" style="margin-top:8px">npx claude-bridge join ' + esc(data.code) + ' --secret ' + esc(data.joinSecret) + ' --name &lt;their-alias&gt;</pre>';
   loadRooms();
 }
 
@@ -1427,14 +1430,16 @@ async function loadRooms() {
     el.innerHTML = '<p class="empty">No rooms yet. Create one above.</p>';
     return;
   }
-  let html = '<table><thead><tr><th>Code</th><th>Join Secret</th><th>Created</th></tr></thead><tbody>';
+  let html = '<table><thead><tr><th>Code</th><th>Join Secret</th><th>Created</th><th></th></tr></thead><tbody>';
   for (const r of data.rooms) {
     const date = new Date(r.createdAt).toLocaleDateString();
+    const joinCmd = 'npx claude-bridge join ' + r.code + ' --secret ' + r.joinSecret + ' --name <alias>';
     html += '<tr><td><strong>' + esc(r.code) + '</strong></td>' +
       '<td><span class="secret-value" data-secret="' + esc(r.joinSecret) + '">' +
       dots(r.joinSecret.length) + '</span> ' +
       '<span class="secret-toggle" onclick="toggleSecret(this)">[show]</span></td>' +
-      '<td>' + esc(date) + '</td></tr>';
+      '<td>' + esc(date) + '</td>' +
+      '<td><button class="btn btn-sm" onclick="copyCmd(this, &quot;' + esc(joinCmd) + '&quot;)">Copy join cmd</button></td></tr>';
   }
   html += '</tbody></table>';
   el.innerHTML = html;
@@ -1495,6 +1500,13 @@ function toggleSecret(el) {
     span.textContent = dots(secret.length);
     el.textContent = '[show]';
   }
+}
+
+function copyCmd(btn, cmd) {
+  navigator.clipboard.writeText(cmd).then(function() {
+    btn.textContent = 'Copied!';
+    setTimeout(function() { btn.textContent = 'Copy join cmd'; }, 2000);
+  });
 }
 
 function dots(n) { return '\\u2022'.repeat(Math.min(n, 16)); }
