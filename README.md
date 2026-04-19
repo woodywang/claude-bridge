@@ -46,21 +46,41 @@ Each instance joins with a **required alias** (e.g. Alice, Bob, Charlie). All co
 
 ```bash
 npm install
+
+# Create KV namespace
+npx wrangler kv:namespace create SESSIONS
+# → Update the id in wrangler.toml [[kv_namespaces]]
+
+# Set Google OAuth secrets
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+
+# Deploy
 npx wrangler deploy
 # → https://claude-bridge.<subdomain>.workers.dev
 ```
 
-### 2. Create a room and join
+Google OAuth setup: create credentials at [Google Cloud Console](https://console.cloud.google.com/apis/credentials). Set authorized redirect URI to `https://claude-bridge.<subdomain>.workers.dev/auth/callback`.
+
+### 2. Login and create a room
 
 ```bash
-# Machine A creates the room
-claude-bridge host --worker-url <url>
-# → Room code: ABC123
+# Login via web dashboard → get API token → authenticate CLI
+claude-bridge login <api-token>
 
-# Each machine installs the MCP server + hooks (--name is required)
-claude-bridge mcp-install --role host --code ABC123 --name Alice --worker-url <url>
-claude-bridge mcp-install --role peer --code ABC123 --name Bob --worker-url <url>
-claude-bridge mcp-install --role peer --code ABC123 --name Charlie --worker-url <url>
+# Create a room (requires authentication)
+claude-bridge host
+# → Room code: ABC123
+# → Join secret: a1b2c3d4...
+```
+
+### 3. Join the room
+
+```bash
+# Each machine installs the MCP server + hooks
+claude-bridge mcp-install --role host --code ABC123 --secret <join-secret> --name Alice
+claude-bridge mcp-install --role peer --code ABC123 --secret <join-secret> --name Bob
+claude-bridge mcp-install --role peer --code ABC123 --secret <join-secret> --name Charlie
 ```
 
 Restart Claude Code on all machines. Any number of instances can join the same room.
@@ -91,7 +111,7 @@ Create `~/.claude/commands/bridge-recv.md`:
 
 | Tool | Description |
 |------|-------------|
-| `bridge_send(title, body)` | Broadcast encrypted message to all peers |
+| `bridge_send(title, body, to?)` | Send to specific peers or broadcast to all |
 | `bridge_inbox()` | List messages with read/unread status, sender names (sorted by server seqId) |
 | `bridge_read(id)` | Read full message (does NOT mark as read) |
 | `bridge_mark_read(ids)` | Mark messages as read after human review |
@@ -166,7 +186,7 @@ npx wrangler dev                               # local Worker on :8787
 ```
 src/
   shared/      # crypto.ts, protocol.ts — pure logic, no I/O
-  worker/      # CF Worker + BridgeRoom DO (member registry, message relay)
+  worker/      # CF Worker: auth, API, pages, BridgeRoom DO (relay)
   mcp/         # MCP server, tools, WebSocket client, inbox
   hooks/       # UserPromptSubmit hook script
   integration/ # E2E tests against wrangler dev
@@ -178,14 +198,18 @@ bin/
 
 ## Security
 
+**Authentication:**
+- Google OAuth for web login, KV-backed sessions (7-day TTL, HttpOnly cookies)
+- API tokens for CLI (365-day TTL, mode 0600 on disk)
+- Room creation requires authentication; join requires room-specific secret
+- DO remains zero-knowledge — auth is enforced at the Worker edge
+
+**Encryption:**
 - E2E pairwise encryption: X25519 DH + XSalsa20-Poly1305, random 24-byte nonce
 - Each recipient gets a separately encrypted copy (no shared group key)
 - Targeted replies: only the intended recipient(s) can decrypt
-- DO is zero-knowledge: stores only encrypted blobs + public keys
-- Persistent identity: keypair saved to `~/.claude-bridge/identity-<name>.json` (mode 0600), stable across restarts
-- Identity: BLAKE2b fingerprint of public key (8 hex chars) + user-configured alias
+- Persistent identity: keypair saved to `~/.claude-bridge/identity-<name>.json` (mode 0600)
 - Server-assigned monotonic seqId for message ordering (no client clock dependency)
-- Max message size: 256KB before encryption
 
 **Known limitations:**
 - No MITM protection (relay could substitute pubkeys). Self-hosted only until out-of-band verification is added.

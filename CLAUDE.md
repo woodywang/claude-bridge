@@ -9,12 +9,16 @@ E2E encrypted multi-party Claude Code collaboration. N instances on different ma
 ## Architecture
 
 ```
-Claude A ←stdio→ MCP Server ←WSS→ CF Durable Object (relay) ←WSS→ MCP Server ←stdio→ Claude B
-                 (encrypt)         (member registry,          (decrypt)
-                                    message log, zero-knowledge)
+Browser → [Google OAuth] → Session → Web Admin (create room, manage tokens)
+CLI     → [API Token]    → Bearer  → POST /api/room/create
+                                        ↓
+Claude A ←stdio→ MCP Server ←WSS→ CF Worker (auth) → DO (relay) ←WSS→ MCP Server ←stdio→ Claude B
+                 (encrypt)         (join secret      (member registry,   (decrypt)
+                                    validation)       message log, zero-knowledge)
 ```
 
-- **DO maintains member registry**: fingerprint, publicKey, name, online status.
+- **Worker auth layer**: Google OAuth login, KV-backed sessions, API tokens for CLI. Room creation requires authentication. WebSocket join requires room join secret.
+- **DO maintains member registry**: fingerprint, publicKey, name, online status. DO is zero-knowledge — no auth info.
 - **MCP Server (single process)**: stdio for Claude Code + WebSocket to DO. Computes pairwise shared secrets on connect.
 - **Pairwise encryption**: each message encrypted separately per recipient (X25519 DH + XSalsa20-Poly1305). Wire format: `{from: fingerprint, recipients: {fp: blob, ...}}`.
 - **Targeted sending**: `encryptAndSend(msg, state, targets?)` sends to specific peers when targets provided, broadcasts otherwise.
@@ -68,7 +72,7 @@ npx wrangler deploy                         # deploy to Cloudflare
 | Directory | Runtime | I/O | Notes |
 |-----------|---------|-----|-------|
 | `src/shared/` | Any | None | Pure logic: crypto, protocol types |
-| `src/worker/` | CF Workers | DO storage, WebSocket | Separate tsconfig. No Node imports |
+| `src/worker/` | CF Workers | DO storage, WebSocket, KV | Separate tsconfig. No Node imports. Auth + API + pages modules. |
 | `src/mcp/` | Node.js | stdio, WebSocket, filesystem | MCP server + tools. Never console.log |
 | `src/hooks/` | Node.js | filesystem, stdout | Hook script, MAY console.log |
 | `src/cli.ts` | Node.js | filesystem, network, stdout | MAY console.log |
@@ -80,7 +84,7 @@ npx wrangler deploy                         # deploy to Cloudflare
 - `bridge_members()` — list all instances (self + peers) with name, fingerprint, role
 
 **Messaging:**
-- `bridge_send(title, body)` — broadcast to all peers
+- `bridge_send(title, body, to?)` — send to specific peers or broadcast to all
 - `bridge_inbox()` — list messages with read/unread, sender names (sorted by server seqId)
 - `bridge_read(id)` — read full message (does NOT mark as read)
 - `bridge_mark_read(ids)` — mark messages as read after human review
