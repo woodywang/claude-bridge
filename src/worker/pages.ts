@@ -489,9 +489,11 @@ section {
 
 /* ── Pricing ─────────────────────────────────────────────────────────── */
 .pricing {
-  text-align: center;
   padding: 100px 0;
   border-top: 1px solid var(--border);
+}
+.pricing .pricing-grid {
+  text-align: center;
 }
 .pricing-grid {
   display: grid;
@@ -580,7 +582,6 @@ section {
 
 /* ── Bottom CTA ──────────────────────────────────────────────────────── */
 .bottom-cta {
-  text-align: center;
   padding: 100px 0 120px;
   border-top: 1px solid var(--border);
 }
@@ -588,9 +589,8 @@ section {
   margin-bottom: 12px;
 }
 .bottom-cta .section-desc {
-  margin: 0 auto 40px;
   max-width: 480px;
-  text-align: center;
+  margin-bottom: 40px;
 }
 .bottom-cta .hero-actions {
   opacity: 1;
